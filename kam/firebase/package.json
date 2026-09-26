@@ -1,0 +1,13 @@
+{
+  "name": "kam-firebase",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Firestore Security Rules tests for the Know About Me app. Runs entirely against the Firebase Emulator Suite; no real Firebase project or credentials are required.",
+  "scripts": {
+    "test": "node --test test/firestore.rules.test.js"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "firebase": "^12.19.0"
+  }
+}

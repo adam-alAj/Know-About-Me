@@ -1,15 +1,19 @@
 # Architecture
 
 Mutual Device Presence & Reassurance System. This document describes the
-architecture **as implemented** after Phase 2. Phase 1 built the domain foundation;
-Phase 2 built the application architecture around it.
+architecture **as implemented** after Phase 3. Phase 1 built the domain foundation;
+Phase 2 built the application architecture around it; Phase 3 added the Firebase
+backend foundation (see §14 for the summary and the dedicated documents for detail).
 
 Related documents:
 
+- `docs/architecture/FIREBASE_ARCHITECTURE.md` — Firebase services, environments, boundaries.
+- `docs/architecture/FIRESTORE_DATA_MODEL.md` — collections, ownership, retention.
+- `docs/architecture/FIREBASE_SECURITY.md` — authorization model and Security Rules.
 - `docs/platform/PLATFORM_CAPABILITIES.md` — what Android and iOS actually allow.
 - `docs/requirements/REQUIREMENT_MAPPING.md` — SRS requirement → domain → phase.
 - `docs/decisions/` — Architecture Decision Records.
-- `docs/PHASE_01_COMPLETION_REPORT.md`, `docs/PHASE_02_COMPLETION_REPORT.md`.
+- `docs/PHASE_01_COMPLETION_REPORT.md`, `docs/PHASE_02_COMPLETION_REPORT.md`, `docs/PHASE_03_COMPLETION_REPORT.md`.
 
 ---
 
@@ -53,7 +57,8 @@ lib/
 │   ├── domain/                     DeviceMetric (shared metric vocabulary)
 │   ├── error/                      AppException (thrown) + AppFailure (returned)
 │   ├── extensions/                 DurationX formatting
-│   ├── firebase/                   FirebaseBootstrap (Phase 2 no-op)
+│   ├── firebase/                   Firebase boundary (see §14): bootstrap,
+│   │                               options, emulator wiring, error mapping
 │   ├── freshness/                  DataFreshness + FreshnessPolicy
 │   ├── logging/                    AppLogger abstraction + implementations
 │   ├── platform/                   DevicePlatform, PlatformInfo
@@ -70,6 +75,7 @@ lib/
     ├── auth/          domain(models+repository) · data(repository impl) · presentation(profile, providers)
     ├── pairing/       domain(models)
     ├── device_state/  domain(models+capability+source) · data(source impl) · presentation(metric tile, providers)
+    ├── (data/ layers are where Firebase SDKs are allowed to appear — §14)
     ├── location/      domain(models)
     ├── rules/         domain(models) · presentation(placeholder screen)
     ├── notifications/ domain(model)
@@ -79,8 +85,9 @@ lib/
 ```
 
 `lib/core/extensions/` holds only `DurationX`. There is deliberately **no**
-`core/networking/` yet: there is no HTTP client to abstract — Firebase is the
-transport and arrives in Phase 3. Creating one now would be an empty folder.
+`core/networking/`: Firestore is the transport, and the only HTTP-shaped client
+(`cloud_firestore`/`firebase_auth`) is confined to `core/firebase/` and feature
+`data/` layers (§14).
 
 ---
 
@@ -100,9 +107,12 @@ Design rules:
 
 - No initialization logic lives in a widget.
 - `initialize()` returns the resolved `AppConfig` and is testable in isolation.
-- Services that do not exist yet (Firebase, auth state, local persistence,
-  notification handling, background monitoring registration) have a commented slot
-  in the sequence rather than speculative code.
+- `FirebaseBootstrap.initialize(config, logger:)` is the third step. It is
+guarded: when Firebase is unconfigured or initialization fails it returns `false`
+and logs, and the app continues offline. It never throws into startup.
+- Services that do not exist yet (auth state, local persistence, notification
+  handling, background monitoring registration) have a commented slot in the
+  sequence rather than speculative code.
 - `AppErrorBoundary.install()` replaces Flutter's error widget with a calm
   fallback so a broken subtree does not show a red screen.
 
@@ -112,10 +122,16 @@ Design rules:
 
 - Compile-time configuration through `--dart-define`, read once into `AppConfig`.
 - `APP_ENV` (`development` | `staging` | `production`, default `development`),
-  `ENABLE_VERBOSE_LOGGING`, `FIREBASE_PROJECT_ID`.
+  `ENABLE_VERBOSE_LOGGING`.
+- Firebase client identifiers: `FIREBASE_PROJECT_ID`, `FIREBASE_API_KEY`,
+  `FIREBASE_APP_ID`, `FIREBASE_MESSAGING_SENDER_ID`, plus optional
+  `FIREBASE_AUTH_DOMAIN` / `FIREBASE_STORAGE_BUCKET` and the emulator switch
+  `FIREBASE_USE_EMULATORS`. All four core identifiers are required together; a
+  partial set counts as *not configured*, so a mistake fails closed.
 - Values reach widgets only through `appConfigProvider`; nothing reads the
   compiler environment inside the UI.
-- **Client-safe**: Firebase project id, API base URLs, feature flags.
+- **Client-safe**: Firebase project id, API key, app id, sender id, API base URLs,
+  feature flags. These identify a project and are not credentials.
 - **Never client-side**: Firebase Admin/service-account credentials, private API
   keys, Cloud Functions secrets. `.gitignore` also blocks `*.env`, `*.pem`,
   `*.jks`, `service-account*.json` as defence in depth.
@@ -132,6 +148,7 @@ locator, and no `get_it`.
 | Seam | Provider | Default (Phase 2) |
 | --- | --- | --- |
 | Configuration | `appConfigProvider` (`app/providers.dart`) | must be overridden at runtime |
+| Firebase initialization | `FirebaseBootstrap.initialize()` result, consumed in `bootstrap.dart` | `false` when unconfigured |
 | Time | `clockProvider` | `SystemClock` |
 | Logging | `loggerProvider` | `DeveloperAppLogger` (level from config) |
 | Platform detection | `platformInfoProvider` | `FlutterPlatformInfo` |
@@ -162,13 +179,13 @@ See `ADR-005-dependency-injection-and-error-handling.md`.
 /history         history      │
 /privacy         privacy      ┘
 /profile         profile      ← pushed above the shell
-/sign-in, /pairing            ← reserved names for Phase 3/4 guards
+/sign-in, /pairing            ← reserved names for the Phase 4 auth guard
 ```
 
 - Route names and paths live in `AppRoutes` (`app/router/app_routes.dart`); no
   widget uses a string literal path.
 - Authentication-aware navigation is supported by passing a `redirect` callback
-  to `createAppRouter()`. Phase 3 supplies the guard; no route needs restructuring.
+  to `createAppRouter()`. Phase 4 supplies the guard; no route needs restructuring.
 - Unmatched locations render `UnknownRouteScreen` via `errorBuilder`.
 - The shell holds no business state; each branch screen owns its own `AppBar` and
   content through `AppScaffold`.
@@ -224,6 +241,11 @@ Two distinct types, intentionally:
   (`permission`, `configuration`, `remoteService`, `unsupportedCapability`,
   …) and maps anything unknown to a generic message while retaining the original
   error in `cause` for logging only. Internals are never shown to the user.
+- `FirebaseErrorMapper` (`core/firebase/firebase_error_mapper.dart`) performs the
+  SDK-specific half: it converts `FirebaseException`/`FirebaseAuthException`
+  codes (plus plugin `PlatformException`s and `SocketException`) into
+  `AppException` types and user-safe messages. It is a pure function, so it is unit
+  tested without any Firebase connection.
 - The UI never branches on exception types: it renders a `DataPresentation`.
 
 Exhaustiveness is the point: `Result` and `AppFailure` are `sealed`, so a new
@@ -338,15 +360,66 @@ of "Battery: 0%" is enforced (FR-048).
 
 ---
 
-## 14. Firebase boundaries
+## 14. Firebase boundaries (Phase 3)
 
-Unchanged from Phase 1 (`ADR-002-firebase-boundaries.md`): authorization is
-enforced server-side; observation happens client-side. Phase 2 adds **no**
-Firebase dependency at all — an architecture test asserts this, and
-`FirebaseBootstrap.initialize` remains the single no-op switch Phase 3 flips.
+The responsibility split is unchanged from Phase 1 (`ADR-002`)
+and made concrete by `ADR-007`. Full detail lives in the three dedicated
+documents; this section is the map.
+
+| Document | Answers |
+| --- | --- |
+| `FIREBASE_ARCHITECTURE.md` | Which services, which environments, how the client connects, offline/cost/error strategy |
+| `FIRESTORE_DATA_MODEL.md` | Which collections, what they hold, who owns them, retention |
+| `FIREBASE_SECURITY.md` | Who may read/write what, and why the rules are trustworthy |
+
+### What is integrated
+
+- `lib/core/firebase/` is the only Firebase-aware part of `core/`:
+  `firebase_config.dart` (options from config), `firebase_bootstrap.dart`
+  (guarded init), `firebase_emulators.dart` (emulator endpoints),
+  `firebase_error_mapper.dart` (SDK errors → `AppException`).
+- Firebase initialization is one call in `AppBootstrap`, is failure-tolerant, and
+  no widget ever initializes or touches it.
+- **A test enforces the boundary**: `test/architecture/domain_purity_test.dart`
+  fails if a Firebase SDK is imported outside `core/firebase/` or a feature
+  `data/` layer. The UI and the domain layer cannot acquire a Firebase dependency
+  by accident.
+
+### Where data flows
+
+```
+widget → provider → repository interface (domain) → data source (data/)
+                                                        ↓
+                                          Firestore / Firebase Auth / FCM
+```
+
+The presentation layer knows only provider types and `Result`/`AppFailure`; it
+never sees a `FirebaseException`, a `DocumentSnapshot` or a collection path.
+
+### Trust split
+
+| Concern | Client | Server (Security Rules / Admin SDK) |
+| --- | --- | --- |
+| Observation (battery, charging, network, location) | ✅ collects | — |
+| Reading own profile, pair, partner's shared state | reads, gated by rules | — |
+| **Authorization** (pair membership, category sharing) | displays only | ✅ enforced on every request |
+| Pair activation | ❌ cannot | ✅ Admin SDK / Cloud Function |
+| Interpreting state (rules) | evaluates for display | may later re-evaluate |
+
+`pairs.status` is never client-settable, so a client cannot join a pair, a partner
+cannot read a paused/revoked pair, and a client cannot widen its own sharing. The
+rules are tested against the emulator (31 scenarios, `FIREBASE_SECURITY.md` §7).
+
+### Still not implemented
+
+No authentication flow (Phase 4), no pairing/consent workflow (Phase 5), no device
+monitoring (Phase 6), no Cloud Functions project, no FCM registration. Phase 3
+prepared their structure and the security model they must obey.
 
 Facts and interpretations never mix: `ValueOrigin` / `MetricValue.isInterpretation`
-and `Interpretation.isObjectiveFact` make the distinction part of the type system.
+and `Interpretation.isObjectiveFact` make the distinction part of the type system,
+and `pairs/*/rules` stores a user-defined `probabilityPercent` separately from any
+future model-generated estimate (`FIRESTORE_DATA_MODEL.md` §8).
 
 ---
 
@@ -374,13 +447,16 @@ and `Interpretation.isObjectiveFact` make the distinction part of the type syste
 | UI states | `test/widget/data_state_view_test.dart` | loading / failure / empty / unknown / unsupported / unavailable / paused / stale |
 | Routing | `test/widget/router_test.dart` | initial route, branch navigation, profile push, unknown route |
 | DI seams | `test/widget/profile_screen_test.dart` | `AuthRepository` replaced by a fake (signed out, signed in, failure) |
-| Startup | `test/unit/app_startup_test.dart` | Bootstrap resolves config and logs, without Firebase |
-| Architecture | `test/architecture/domain_purity_test.dart` | Domain purity, `core` ↛ features, no Firebase coupling |
+| Startup | `test/unit/app_startup_test.dart` | Bootstrap resolves config, never throws without Firebase |
+| Firebase config/errors | `test/unit/firebase_config_test.dart`, `firebase_error_mapper_test.dart` | Options assembly, partial config fails closed, SDK error classification |
+| Architecture | `test/architecture/domain_purity_test.dart` | Domain purity, `core` ↛ features, Firebase confined to `core/firebase/` + `data/` |
+| Firestore Security Rules | `firebase/test/firestore.rules.test.js` | 31 emulator scenarios (unauthenticated, isolation, sharing gates, unauthorized writes) |
 
 Doubles live in `test/fakes/` (`FakeAuthRepository`, `FakeDeviceStateSource`,
 `RecordingLogger`) and helpers in `test/support/test_app.dart`
-(`pumpTestApp`, `fixedClock`). Tests never touch Firebase, the network or real
-device APIs.
+(`pumpTestApp`, `fixedClock`). Flutter tests never touch Firebase, the network or
+real device APIs — Firebase behaviour is covered by pure functions (config, error
+mapping) and by the emulator suite, which is where rules must be proven.
 
 ---
 
@@ -398,6 +474,12 @@ all recorded here because Phase 1 constraints require changes to be justified:
 
 None of these changed a model's meaning or behaviour; all Phase 1 tests still pass.
 
+Phase 3 changed no existing architecture. It added `lib/core/firebase/` and
+`lib/firebase/` configuration, plus one new architecture rule (Firebase may appear
+only in `core/firebase/` and feature `data/` layers) recorded in ADR-007. The
+Phase 2 placeholder `DeviceStateSource`/`AuthRepository` implementations are
+untouched and remain the defaults until Phases 4–6 replace them.
+
 ---
 
 ## 18. Future extensibility
@@ -414,10 +496,13 @@ None of these changed a model's meaning or behaviour; all Phase 1 tests still pa
 
 ---
 
-## 19. Explicit non-goals for Phases 1–2
+## 19. Explicit non-goals so far
 
-No authentication, Firebase backend, pairing, device monitoring, location
-tracking, rule evaluation, notifications or event history was implemented. Phase 2
-created the structure those features plug into: bootstrap, DI seams, routing
-shell, result/error handling, platform abstraction, shared UI, logging and the
-tests that hold the boundaries.
+No authentication, pairing, device monitoring, location tracking, rule evaluation,
+notifications or event history has been implemented. There is no Cloud Functions
+project and no FCM registration.
+
+What exists is the structure those features plug into: bootstrap, DI seams, routing
+shell, result/error handling, platform abstraction, shared UI, logging, the tests
+that hold the boundaries, and (Phase 3) a secure Firestore foundation with
+enforced pair-scoped authorization.

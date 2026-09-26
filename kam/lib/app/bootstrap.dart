@@ -37,12 +37,22 @@ abstract final class AppBootstrap {
       context: {'environment': config.environment.name},
     );
 
-    // Phase 3 replaces the no-op with real Firebase initialization.
-    final firebaseReady = await FirebaseBootstrap.initialize(config);
+    // Firebase is initialized here and only here (never from a widget).
+    final firebaseReady = await FirebaseBootstrap.initialize(
+      config,
+      logger: logger,
+    );
     if (!firebaseReady) {
-      logger.info(
-        'Firebase is not configured for this build; continuing offline.',
-      );
+      final failure = FirebaseBootstrap.lastFailure;
+      if (failure != null) {
+        // Initialization was attempted and failed: report it, but keep going so
+        // the app degrades instead of refusing to start (NFR-014, NFR-015).
+        logger.warning('Continuing without Firebase: ${failure.message}');
+      } else {
+        logger.info(
+          'Firebase is not configured for this build; continuing offline.',
+        );
+      }
     }
 
     // Future services slot in here: auth state, local persistence,

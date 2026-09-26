@@ -1,0 +1,395 @@
+rules_version = '2';
+
+// Firestore Security Rules — Mutual Device Presence & Reassurance System.
+//
+// Design principles (see docs/architecture/FIREBASE_SECURITY.md):
+//   1. Default deny. Nothing is readable or writable unless a rule allows it.
+//   2. Authentication is identity, never authorization. Being signed in grants
+//      access to your own data only.
+//   3. Partner data is reachable ONLY through an ACTIVE pair whose owner has
+//      explicitly enabled that category and has not paused sharing.
+//   4. Location is gated independently of every other category (NFR-036).
+//   5. Field-level minimisation is enforced on WRITE (so disabled categories are
+//      never stored) and re-checked on READ (so a lingering field cannot become
+//      readable after sharing is turned off).
+//   6. History and interpretation documents are append-only.
+//   7. A user-defined interpretation can only be created with isUserDefined =
+//      true, so a configured percentage can never masquerade as a measured one
+//      (SRS FR-030, NFR-023, NFR-041).
+//   8. Privileged transitions (activating a pair) are server-side only: no rule
+//      permits a client to set status to 'active'.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =====================================================================
+    // Helpers
+    // =====================================================================
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function isSelf(id) {
+      return signedIn() && uid() == id;
+    }
+
+    // All categories a user may share. Mirrors SharingCategory in the Flutter
+    // domain model; keep the two in sync.
+    function validCategories() {
+      return [
+        'battery',
+        'charging',
+        'network',
+        'location',
+        'distanceFromHome',
+        'activityIndicators',
+        'ruleInterpretations'
+      ];
+    }
+
+    function pairDoc(pairId) {
+      return /databases/$(database)/documents/pairs/$(pairId);
+    }
+
+    function pairExists(pairId) {
+      return exists(pairDoc(pairId));
+    }
+
+    function pairData(pairId) {
+      return get(pairDoc(pairId)).data;
+    }
+
+    function isMember(pairId) {
+      return signedIn()
+        && pairExists(pairId)
+        && uid() in pairData(pairId).memberIds;
+    }
+
+    function isActivePair(pairId) {
+      return isMember(pairId) && pairData(pairId).status == 'active';
+    }
+
+    // Per-pair sharing decision of one member. One document per (pair, user) so
+    // there is a single source of truth for "am I sharing this right now".
+    function sharingDoc(pairId, ownerId) {
+      return /databases/$(database)/documents/pairs/$(pairId)/sharing/$(ownerId);
+    }
+
+    function hasSharing(pairId, ownerId) {
+      return exists(sharingDoc(pairId, ownerId));
+    }
+
+    function sharing(pairId, ownerId) {
+      return get(sharingDoc(pairId, ownerId)).data;
+    }
+
+    function notPaused(pairId, ownerId) {
+      return hasSharing(pairId, ownerId) && sharing(pairId, ownerId).paused == false;
+    }
+
+    function shares(pairId, ownerId, category) {
+      return hasSharing(pairId, ownerId) && category in sharing(pairId, ownerId).categories;
+    }
+
+    // May the caller currently read one shared category of another member?
+    function canReadShared(pairId, ownerId, category) {
+      return isActivePair(pairId) && notPaused(pairId, ownerId) && shares(pairId, ownerId, category);
+    }
+
+    // Field-level minimisation on read: every present field must still be shared.
+    function stateFieldsStillShared(pairId, ownerId) {
+      return (!('batteryPercentage' in resource.data.keys()) || shares(pairId, ownerId, 'battery'))
+        && (!('isCharging' in resource.data.keys()) || shares(pairId, ownerId, 'charging'))
+        && (!('chargingStartedAt' in resource.data.keys()) || shares(pairId, ownerId, 'charging'))
+        && (!('chargingDurationSeconds' in resource.data.keys()) || shares(pairId, ownerId, 'charging'))
+        && (!('networkState' in resource.data.keys()) || shares(pairId, ownerId, 'network'))
+        && (!('activityState' in resource.data.keys()) || shares(pairId, ownerId, 'activityIndicators'))
+        && (!('lastActivityAt' in resource.data.keys()) || shares(pairId, ownerId, 'activityIndicators'));
+    }
+
+    function locationFieldsStillShared(pairId, ownerId) {
+      return (!('latitude' in resource.data.keys()) || shares(pairId, ownerId, 'location'))
+        && (!('longitude' in resource.data.keys()) || shares(pairId, ownerId, 'location'))
+        && (!('distanceFromHomeKm' in resource.data.keys()) || shares(pairId, ownerId, 'distanceFromHome'));
+    }
+
+    // =====================================================================
+    // users/{uid}
+    //   Owner-only profile and settings. A partner NEVER reads this document;
+    //   the partner-visible display name lives in pairs/{pairId}/members/{uid}.
+    //   Home coordinates therefore stay private and the partner only ever sees
+    //   the derived distance written into the shared state.
+    // =====================================================================
+    match /users/{userId} {
+
+      allow read: if isSelf(userId);
+
+      allow create: if isSelf(userId)
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() > 0
+        && request.resource.data.displayName.size() <= 120
+        && request.resource.data.keys().hasOnly([
+             'displayName', 'photoUrl', 'timeZone', 'createdAt', 'updatedAt'
+           ]);
+
+      allow update: if isSelf(userId)
+        && request.resource.data.keys().hasOnly([
+             'displayName', 'photoUrl', 'timeZone', 'createdAt', 'updatedAt'
+           ])
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() <= 120;
+
+      // Data deletion is a user right (NFR-032); deeper retention policy is
+      // handled server-side in a later phase.
+      allow delete: if isSelf(userId);
+
+      // Private settings: home location, notification preference. Never shared.
+      match /settings/{documentId} {
+        allow read, write: if isSelf(userId) && documentId == 'preferences';
+      }
+
+      // Rule definitions are private to their owner. The partner only ever sees
+      // the interpretations a rule produces.
+      match /rules/{ruleId} {
+        allow read, delete: if isSelf(userId);
+
+        allow create, update: if isSelf(userId)
+          && request.resource.data.ownerUserId == userId
+          && request.resource.data.pairId is string
+          && request.resource.data.name is string
+          && request.resource.data.name.size() <= 120
+          && request.resource.data.condition is map
+          && request.resource.data.actions is list
+          && request.resource.data.enabled is bool
+          // A user-configured percentage must never be stored as if measured.
+          && request.resource.data.actions.size() <= 8;
+      }
+
+      // Push tokens. Owner-only: a token is never readable by a partner.
+      match /fcmTokens/{tokenId} {
+        allow read, write: if isSelf(userId);
+      }
+
+      // Notifications for this user. Created by the server only (the Admin SDK
+      // bypasses rules); the client may only mark one as read.
+      match /notifications/{notificationId} {
+        allow read: if isSelf(userId);
+
+        allow update: if isSelf(userId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+          && request.resource.data.read is bool;
+
+        // Only the backend creates or removes notifications.
+        allow create, delete: if false;
+      }
+    }
+
+    // =====================================================================
+    // pairs/{pairId} — the central security boundary.
+    // =====================================================================
+    match /pairs/{pairId} {
+
+      // Members can read the pair they belong to. `resource.data` is used
+      // directly (no extra get()); list queries are only permitted when they
+      // filter on memberIds.
+      allow read: if signedIn() && uid() in resource.data.memberIds;
+
+      // A connection request is created by a signed-in user who includes
+      // themselves. It is always 'pending': activation is server-side.
+      allow create: if signedIn()
+        && request.resource.data.memberIds is list
+        && request.resource.data.memberIds.size() == 2
+        && uid() in request.resource.data.memberIds
+        && request.resource.data.memberIds[0] != request.resource.data.memberIds[1]
+        && request.resource.data.status == 'pending'
+        && request.resource.data.requestedBy == uid()
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.keys().hasOnly([
+             'memberIds', 'status', 'requestedBy', 'createdAt', 'updatedAt'
+           ]);
+
+      // Membership is immutable. A member may only end a relationship, never
+      // grant access: 'active' can be reached only by the trusted backend.
+      allow update: if isMember(pairId)
+        && request.resource.data.memberIds == resource.data.memberIds
+        && request.resource.data.requestedBy == resource.data.requestedBy
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.status is string
+        && (
+             request.resource.data.status == resource.data.status
+             || (
+                  resource.data.status in ['pending', 'active', 'paused']
+                  && request.resource.data.status in ['disconnected', 'revoked']
+                )
+           );
+
+      // Pairs are ended, not deleted, so history stays auditable.
+      allow delete: if false;
+
+      // --- pair-scoped member profile (the partner-visible name/photo) ------
+      match /members/{memberId} {
+        allow read: if isMember(pairId);
+
+        allow create: if isMember(pairId)
+          && isSelf(memberId)
+          && request.resource.data.displayName is string
+          && request.resource.data.displayName.size() <= 120;
+
+        allow update: if isMember(pairId)
+          && isSelf(memberId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               'displayName', 'photoUrl'
+             ]);
+
+        allow delete: if false;
+      }
+
+      // --- explicit consent per user ---------------------------------------
+      // Pairing is not authorization: each user records their own decision.
+      match /consents/{consentId} {
+        allow read: if isMember(pairId);
+
+        allow create, update: if isMember(pairId)
+          && isSelf(consentId)
+          && request.resource.data.userId == consentId
+          && request.resource.data.pairId == pairId
+          && request.resource.data.granted is bool
+          && request.resource.data.categories is list
+          && request.resource.data.categories.hasOnly(validCategories());
+
+        allow delete: if isSelf(consentId);
+      }
+
+      // --- live sharing switches -------------------------------------------
+      // Enforced on every partner read, so disabling a category takes effect
+      // immediately and cannot be bypassed by a modified client.
+      match /sharing/{sharingId} {
+        allow read: if isMember(pairId);
+
+        allow create, update: if isMember(pairId)
+          && isSelf(sharingId)
+          && request.resource.data.userId == sharingId
+          && request.resource.data.pairId == pairId
+          && request.resource.data.paused is bool
+          && request.resource.data.categories is list
+          && request.resource.data.categories.hasOnly(validCategories());
+
+        allow delete: if false;
+      }
+
+      // --- registered devices ----------------------------------------------
+      match /devices/{deviceId} {
+        allow read: if isMember(pairId);
+
+        allow create, update: if isMember(pairId)
+          && request.resource.data.ownerUserId == uid()
+          && request.resource.data.deviceId == deviceId
+          && request.resource.data.platform in ['android', 'ios']
+          && request.resource.data.lastSeenAt is timestamp;
+
+        allow delete: if isMember(pairId)
+          && resource.data.ownerUserId == uid();
+      }
+
+      // --- current device state (non-location) -----------------------------
+      // One document per (pair, owner). Writes are validated field by field so a
+      // disabled category is never stored; reads re-check so a lingering field
+      // cannot become visible after sharing is switched off.
+      match /deviceState/{ownerId} {
+        function ownerWritesOwnState() {
+          return isSelf(ownerId)
+            && isActivePair(pairId)
+            && request.resource.data.ownerUserId == uid()
+            && notPaused(pairId, ownerId)
+            && (!('batteryPercentage' in request.resource.data.keys()) || shares(pairId, ownerId, 'battery'))
+            && (!('isCharging' in request.resource.data.keys()) || shares(pairId, ownerId, 'charging'))
+            && (!('chargingStartedAt' in request.resource.data.keys()) || shares(pairId, ownerId, 'charging'))
+            && (!('chargingDurationSeconds' in request.resource.data.keys()) || shares(pairId, ownerId, 'charging'))
+            && (!('networkState' in request.resource.data.keys()) || shares(pairId, ownerId, 'network'))
+            && (!('activityState' in request.resource.data.keys()) || shares(pairId, ownerId, 'activityIndicators'))
+            && (!('lastActivityAt' in request.resource.data.keys()) || shares(pairId, ownerId, 'activityIndicators'));
+        }
+
+        allow read: if isSelf(ownerId)
+          || (
+               isActivePair(pairId)
+               && notPaused(pairId, ownerId)
+               && (
+                    shares(pairId, ownerId, 'battery')
+                    || shares(pairId, ownerId, 'charging')
+                    || shares(pairId, ownerId, 'network')
+                    || shares(pairId, ownerId, 'activityIndicators')
+                  )
+               && stateFieldsStillShared(pairId, ownerId)
+             );
+
+        allow create, update: if ownerWritesOwnState();
+
+        // A paused owner can still remove their own state document.
+        allow delete: if isSelf(ownerId);
+      }
+
+      // --- location: independently gated (NFR-036) -------------------------
+      match /location/{ownerId} {
+        allow read: if isSelf(ownerId)
+          || (
+               canReadShared(pairId, ownerId, 'location')
+               && locationFieldsStillShared(pairId, ownerId)
+             );
+
+        allow create, update: if isSelf(ownerId)
+          && isActivePair(pairId)
+          && request.resource.data.ownerUserId == uid()
+          && notPaused(pairId, ownerId)
+          && shares(pairId, ownerId, 'location')
+          && (!('distanceFromHomeKm' in request.resource.data.keys()) || shares(pairId, ownerId, 'distanceFromHome'));
+
+        allow delete: if isSelf(ownerId);
+      }
+
+      // --- rule interpretations --------------------------------------------
+      // Append-only, and always flagged as user-defined: a configured
+      // percentage can never be stored as a measured one.
+      match /interpretations/{interpretationId} {
+        allow read: if isMember(pairId)
+          && (
+               resource.data.ownerUserId == uid()
+               || (
+                    isActivePair(pairId)
+                    && notPaused(pairId, resource.data.ownerUserId)
+                    && shares(pairId, resource.data.ownerUserId, 'ruleInterpretations')
+                  )
+             );
+
+        allow create: if isActivePair(pairId)
+          && request.resource.data.ownerUserId == uid()
+          && request.resource.data.isUserDefined == true
+          && notPaused(pairId, uid())
+          && shares(pairId, uid(), 'ruleInterpretations');
+
+        allow update, delete: if false;
+      }
+
+      // --- meaningful events (history) -------------------------------------
+      // Append-only. A member may record events for their own device only, and
+      // must use a server timestamp so ordering is trustworthy (NFR-035).
+      match /events/{eventId} {
+        allow read: if isMember(pairId);
+
+        allow create: if isActivePair(pairId)
+          && request.resource.data.ownerUserId == uid()
+          && request.resource.data.occurredAt is timestamp
+          && request.resource.data.recordedAt == request.time;
+
+        allow update, delete: if false;
+      }
+    }
+
+    // Everything not matched above is denied by default.
+  }
+}

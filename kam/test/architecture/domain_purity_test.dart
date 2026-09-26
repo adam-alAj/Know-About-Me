@@ -82,7 +82,7 @@ void main() {
     }
   });
 
-  test('no application source depends on a Firebase SDK in Phase 2', () {
+  test('Firebase SDKs are only imported at the allowed boundaries', () {
     final libFiles = dartFilesIn('lib');
     expect(libFiles, isNotEmpty);
 
@@ -94,15 +94,26 @@ void main() {
       'package:cloud_functions',
     ];
 
+    // Phase 3 introduces Firebase, but only behind the boundaries recorded in
+    // docs/decisions/ADR-007-firebase-integration.md:
+    //   - core/firebase/            (initialization, options, error mapping)
+    //   - features/<f>/data/        (repositories and data sources)
+    // Firebase must never appear in a feature's domain or presentation layer, and
+    // never in shared UI.
+    bool isAllowedBoundary(String path) =>
+        path.contains('/core/firebase/') ||
+        RegExp(r'/features/[^/]+/data/').hasMatch(path);
+
     for (final file in libFiles) {
+      final path = normalized(file);
       for (final target in dependencyTargets(file)) {
-        for (final package in firebasePackages) {
+        if (firebasePackages.any(target.startsWith)) {
           expect(
-            target.startsWith(package),
-            isFalse,
+            isAllowedBoundary(path),
+            isTrue,
             reason:
-                '${normalized(file)} imports $target; Phase 2 must not couple to '
-                'Firebase (see ADR-002 and ADR-005)',
+                '$path imports $target; Firebase SDKs are only allowed in '
+                'core/firebase/ and features/*/data/ (ADR-007)',
           );
         }
       }

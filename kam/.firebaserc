@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "demo-kam",
+    "development": "demo-kam",
+    "production": "REPLACE_WITH_PRODUCTION_PROJECT_ID"
+  }
+}
