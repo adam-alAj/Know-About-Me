@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../core/config/app_config.dart';
 import 'router/app_router.dart';
 import 'theme/app_theme.dart';
+import '../features/device_state/presentation/providers/device_state_providers.dart';
+import '../features/device_state/presentation/providers/device_monitoring_lifecycle.dart';
 
 /// The root widget of the application.
 ///
@@ -23,11 +25,14 @@ class KamApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return MaterialApp.router(
-      title: 'Know About Me',
-      debugShowCheckedModeBanner: false,
-      theme: buildAppTheme(),
-      routerConfig: router ?? ref.watch(appRouterProvider),
+    return DeviceMonitoringLifecycle(
+      controller: ref.watch(deviceMonitoringControllerProvider),
+      child: MaterialApp.router(
+        title: 'Know About Me',
+        debugShowCheckedModeBanner: false,
+        theme: buildAppTheme(),
+        routerConfig: router ?? ref.watch(appRouterProvider),
+      ),
     );
   }
 }

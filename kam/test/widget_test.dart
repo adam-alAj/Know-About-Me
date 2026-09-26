@@ -29,7 +29,10 @@ void main() {
   ) async {
     await pumpTestApp(tester);
 
-    expect(find.textContaining('No connected partner yet'), findsOneWidget);
+    expect(
+      find.textContaining('No partner device data is available yet.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('navigates from the dashboard to the privacy branch', (

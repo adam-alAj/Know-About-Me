@@ -4,9 +4,18 @@ import '../../../../app/providers.dart';
 import '../../../../core/domain/device_metric.dart';
 import '../../../../core/result/result.dart';
 import '../../data/sources/unavailable_device_state_source.dart';
+import '../../data/providers/platform_device_state_provider.dart';
+import '../../data/repositories/local_device_state_repository.dart';
+import '../../data/services/app_device_identity.dart';
+import '../../data/services/shared_preferences_device_identity_store.dart';
+import '../../data/sources/unavailable_platform_device_state_adapter.dart';
 import '../../domain/models/device_capability.dart';
 import '../../domain/models/device_state.dart';
+import '../../domain/models/device_state_snapshot.dart';
+import '../../domain/repositories/device_state_repository.dart';
+import '../../domain/sources/device_state_provider.dart';
 import '../../domain/sources/device_state_source.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
 
 /// The device-state source for this platform.
 ///
@@ -36,4 +45,42 @@ final deviceCapabilityProvider = Provider.family<MetricSupport, DeviceMetric>(
 /// succeeded but the metric is unknown" (SRS NFR-007, NFR-014).
 final currentDeviceStateProvider = FutureProvider<Result<DeviceState>>(
   (ref) => ref.watch(deviceStateSourceProvider).readCurrentState(),
+);
+
+/// App-generated opaque ID; stored locally and unrelated to authorization.
+final appDeviceIdentityProvider = Provider<AppDeviceIdentity>(
+  (ref) => AppDeviceIdentity(SharedPreferencesDeviceIdentityStore()),
+);
+
+/// Local snapshot provider. Unauthenticated use gets an empty owner scope; no
+/// remote operation is exposed here. Phase 11 will require auth and pair rules.
+final deviceStateProvider = Provider<DeviceStateProvider>((ref) {
+  final adapter = UnavailablePlatformDeviceStateAdapter(
+    ref.watch(platformInfoProvider).platform,
+  );
+  return PlatformDeviceStateProvider(
+    deviceId: () => ref.read(appDeviceIdentityProvider).getOrCreate(),
+    userId: () => ref.read(currentIdentityProvider)?.uid,
+    adapter: adapter,
+    clock: () => ref.read(clockProvider).nowUtc(),
+    logger: ref.watch(loggerProvider),
+  );
+});
+
+final localDeviceStateRepositoryProvider = Provider<DeviceStateRepository>(
+  (ref) => LocalDeviceStateRepository(ref.watch(deviceStateProvider)),
+);
+
+final deviceMonitoringControllerProvider = Provider<DeviceMonitoringController>((ref) {
+  final controller = DeviceMonitoringController(ref.watch(localDeviceStateRepositoryProvider));
+  ref.onDispose(controller.dispose);
+  return controller;
+});
+
+final currentLocalDeviceStateProvider = FutureProvider<DeviceStateSnapshot>(
+  (ref) async {
+    ref.watch(currentIdentityProvider);
+    final repository = LocalDeviceStateRepository(ref.watch(deviceStateProvider));
+    return repository.getCurrentLocalState();
+  },
 );

@@ -20,4 +20,6 @@ enum DeviceMetric {
   location,
   distanceFromHome,
   homePresence,
+  screenState,
+  backgroundMonitoring,
 }
