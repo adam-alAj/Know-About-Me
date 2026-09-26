@@ -1,35 +1,62 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/auth/presentation/create_account_screen.dart';
 import '../../features/auth/presentation/profile_screen.dart';
+import '../../features/auth/presentation/providers/auth_providers.dart';
+import '../../features/auth/presentation/sign_in_screen.dart';
+import '../../features/auth/presentation/splash_screen.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/history/presentation/history_screen.dart';
 import '../../features/privacy/presentation/privacy_screen.dart';
 import '../../features/rules/presentation/rules_screen.dart';
 import 'app_routes.dart';
 import 'app_shell.dart';
+import 'auth_redirect.dart';
 import 'unknown_route_screen.dart';
 
 /// Builds the application router.
 ///
 /// The shell hosts the primary destinations as branches so each keeps its own
-/// navigation state. Authentication-aware navigation is supported by passing a
-/// [redirect]: Phase 3 supplies a guard here without restructuring any route.
+/// navigation state. Authentication-aware navigation is supplied through
+/// [redirect] (a pure function from `AuthRedirect`) plus a [refreshListenable]
+/// that fires whenever the authentication state changes.
 ///
 /// ```text
-/// Authentication → Onboarding → Pairing → Main shell
-///                                            ├── Reassurance
-///                                            ├── Rules
-///                                            ├── History
-///                                            └── Privacy
+/// Splash → Sign in / Create account        (unauthenticated)
+///        → Reassurance shell                (authenticated)
+///             ├── Reassurance
+///             ├── Rules
+///             ├── History
+///             └── Privacy
+///          └── Profile (above the shell)
 /// ```
 GoRouter createAppRouter({
   String initialLocation = AppRoutes.dashboardPath,
   GoRouterRedirect? redirect,
+  Listenable? refreshListenable,
 }) {
   return GoRouter(
     initialLocation: initialLocation,
     redirect: redirect,
+    refreshListenable: refreshListenable,
     routes: <RouteBase>[
+      GoRoute(
+        path: AppRoutes.splashPath,
+        name: AppRoutes.splash,
+        builder: (context, state) => const SplashScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.signInPath,
+        name: AppRoutes.signIn,
+        builder: (context, state) => const SignInScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.createAccountPath,
+        name: AppRoutes.createAccount,
+        builder: (context, state) => const CreateAccountScreen(),
+      ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) =>
             AppShell(navigationShell: navigationShell),
@@ -77,11 +104,47 @@ GoRouter createAppRouter({
         name: AppRoutes.profile,
         builder: (context, state) => const ProfileScreen(),
       ),
-      // Phase 3 registers sign-in and pairing routes here, behind the redirect
-      // guard. They are declared in AppRoutes already so guards can reference
-      // them without string literals.
+      // The pairing routes are reserved for the connection phase; the guard
+      // already protects this area, so adding them needs no routing rework.
     ],
     errorBuilder: (context, state) =>
         UnknownRouteScreen(uri: state.uri.toString()),
   );
+}
+
+/// The location the app starts at.
+///
+/// A provider so tests can start at a specific route without building their own
+/// router — which keeps the real guard under test (SRS NFR-018).
+final appInitialLocationProvider = Provider<String>(
+  (ref) => AppRoutes.dashboardPath,
+);
+
+/// The application router, wired to the authentication guard and to
+/// authentication-state changes.
+///
+/// Built inside a provider rather than a widget so the guard can read providers
+/// directly and so the router exists exactly once per container.
+final appRouterProvider = Provider<GoRouter>((ref) {
+  final refresh = _AuthStateRefreshNotifier(ref);
+  ref.onDispose(refresh.dispose);
+
+  return createAppRouter(
+    initialLocation: ref.read(appInitialLocationProvider),
+    redirect: (context, state) => AuthRedirect.resolve(
+      authState: ref.read(authStateProvider),
+      location: state.uri.path,
+    ),
+    refreshListenable: refresh,
+  );
+});
+
+/// Bridges Riverpod's authentication state to go_router's [Listenable], so a
+/// sign-in or sign-out re-evaluates the redirect immediately.
+class _AuthStateRefreshNotifier extends ChangeNotifier {
+  _AuthStateRefreshNotifier(Ref ref) {
+    ref.listen(authStateProvider, (previous, next) {
+      if (previous != next) notifyListeners();
+    });
+  }
 }

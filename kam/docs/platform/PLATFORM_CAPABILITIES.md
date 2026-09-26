@@ -35,7 +35,7 @@ Legend for **Reliable?**:
 | Device power-off detection | **Not available** | **Not available** | No | — | Apps cannot reliably observe shutdown (Android `ACTION_SHUTDOWN` is not guaranteed to complete work; iOS has no API). **Never** claim powered off (FR-015, FR-070). |
 | Background execution | `WorkManager` (periodic, min ~15 min), foreground services | `BGTaskScheduler` (`BGAppRefreshTask`, `BGProcessingTask`) | Partial | No | Timing is opportunistic, not guaranteed; Doze/App Standby and Low Power Mode defer work. |
 | Background synchronization | WorkManager + Firestore offline queue | BGTaskScheduler + Firestore offline queue | Partial | No | Must recover and sync on resume (FR-060, NFR-044). |
-| Push notifications | Firebase Cloud Messaging | APNs via FCM | Partial | Android 13+: `POST_NOTIFICATIONS`; iOS: user authorization | Delivery is best-effort; a rule event must still appear in history if a push fails (FR-044). |
+| Push notifications | No production implementation; local notifications need a platform plugin and remote push is deferred | Android/iOS notification APIs via a future local plugin | Not implemented | Android 13+: `POST_NOTIFICATIONS`; iOS: user authorization | No alert delivery is claimed. The rule boundary reports unsupported until a platform plugin is added; remote push needs a trusted sender. |
 | App lifecycle | Reliable | Reliable | Yes | No | Used to resync and to timestamp "last seen". |
 
 ## 2. Capabilities that must be modelled as reduced or unsupported

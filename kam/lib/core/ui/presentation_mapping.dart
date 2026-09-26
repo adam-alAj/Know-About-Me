@@ -33,6 +33,26 @@ abstract final class PresentationMapping {
     return _fromErrorOrLoading(value);
   }
 
+  /// Maps `AsyncValue<Result<T?>>`, treating a successful `null` as [empty].
+  ///
+  /// Needed because "the read succeeded and there genuinely is nothing" must not
+  /// be rendered as content, and must not be filled in with invented defaults
+  /// (FR-048). The user profile uses this shape: a missing profile document is
+  /// an empty success, never a fabricated `AppUser`.
+  static DataPresentation fromAsyncNullableResult<T>(
+    AsyncValue<Result<T?>> value,
+  ) {
+    if (value.hasValue) {
+      return value.requireValue.fold(
+        onSuccess: (data) => data == null
+            ? const DataPresentation.empty()
+            : const DataPresentation.loaded(),
+        onFailure: (failure) => DataPresentation.failure(failure.message),
+      );
+    }
+    return _fromErrorOrLoading(value);
+  }
+
   static DataPresentation _fromErrorOrLoading(AsyncValue<Object?> value) {
     if (value.hasError) {
       final failure = AppFailure.fromException(value.error!, value.stackTrace);

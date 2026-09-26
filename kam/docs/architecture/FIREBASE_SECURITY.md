@@ -4,7 +4,7 @@ How authorization is enforced for the Mutual Device Presence & Reassurance
 System, and how it is verified.
 
 Rules live in `firebase/firestore.rules`; the data they protect is described in
-`FIRESTORE_DATA_MODEL.md`. The rules are backed by 31 emulator tests in
+`FIRESTORE_DATA_MODEL.md`. The rules are backed by 70 emulator tests in
 `firebase/test/firestore.rules.test.js`.
 
 ---
@@ -23,8 +23,13 @@ The app is a two-person privacy product, so the interesting attackers are:
 | A user trying to fabricate history or interpretations | Make a configured guess look like a measurement, or forge events | `isUserDefined == true` is required; events and interpretations are append-only and owner-bound |
 | Someone with repository access | Obtain privileged credentials | No Admin/service-account credential exists in the client or the repo (`§7`) |
 
-Explicitly **out of scope** for Phase 3: account takeover, device malware,
-traffic analysis, and the security of Cloud Functions (none exist yet).
+Explicitly **out of scope**: account takeover, device malware, traffic analysis,
+and server-side rate limiting (Security Rules cannot throttle).
+
+There is no Cloud Functions project and there will not be one: the architecture
+is designed for Spark and no live project is configured, so every decision below
+is enforced by Security Rules rather than by trusted server code
+([ADR-009](../decisions/ADR-009-spark-only-no-cloud-functions.md)).
 
 ---
 
@@ -42,11 +47,15 @@ person's data additionally requires:
 
 1. an **active pair** (`pairs/{pairId}.status == 'active'`),
 2. membership of that pair (`request.auth.uid in memberIds`),
-3. the owner's sharing document to have the category enabled, and
-4. the owner not to have paused sharing.
+3. the owner's **consent document to be granted**
+   (`pairs/{pairId}/consents/{ownerId}.granted == true`),
+4. the owner's sharing document to have the category enabled, and
+5. the owner not to have paused sharing.
 
-A completed pairing flow is still not authorization: activation is server-side,
-and sharing is a separate, revocable decision (SRS FR-005, NFR-003).
+A completed pairing flow is still not authorization: activation requires *both*
+users' consent documents, and sharing is a separate, revocable decision
+(SRS FR-005, NFR-003). Because consent is checked on every partner read, revoking
+it takes effect immediately rather than at the next write.
 
 ---
 
@@ -108,20 +117,29 @@ affect battery/charging/network and vice versa (FR-021).
 
 ---
 
-## 5. Privileged transitions are server-side only
+## 5. Privileged transitions without a server
 
-| Operation | Client | Server |
+Under Spark there is no trusted process, so each formerly server-only operation
+is now gated by a rule on facts the client cannot forge. "Gated by" means the
+*client may send the request* but the rules independently verify it — the client
+is never the authority.
+
+| Operation | Client | Rules |
 | --- | --- | --- |
-| Create a connection request (`pending`) | ✅ (must include self, must set `createdAt == request.time`) | — |
-| Change membership | ❌ (immutable: `memberIds`, `requestedBy`, `createdAt` must be unchanged) | — |
-| Activate (`pending → active`) | ❌ **no rule permits it** | ✅ (Admin SDK, Phase 5) |
-| End (`→ disconnected` / `revoked`) | ✅ either member | ✅ |
-| Write another member's sharing or consent | ❌ | ✅ |
-| Create/delete notifications | ❌ | ✅ |
-| Update/delete events or interpretations | ❌ | ✅ (retention jobs, Phase 12) |
+| Create a connection request (`pending`) | ✅ (must include self, `createdAt == request.time`) | verifies |
+| Change membership | ❌ (immutable: `memberIds`, `requestedBy`, `createdAt`) | rejects |
+| Activate (`pending → active`) | ✅ may *request* it | ✅ **only if `bothConsentsGranted()`**, i.e. both `consents/{uid}` documents are `granted == true`, with a server timestamp. Each consent can only be written by its own subject, so agreement cannot be forged |
+| Resume (`paused → active`) | ✅ may request | ✅ same both-consent gate |
+| End (`→ disconnected` / `revoked`) | ✅ either member | allows |
+| Write another member's sharing or consent | ❌ | rejects (`isSelf(consentId)`/`isSelf(sharingId)`) |
+| Issue a pairing code | ✅ (CSPRNG, ≥20 chars) | ✅ enforces length, `expiresAt` within 1 h and in the future |
+| Redeem a pairing code | ✅ | ✅ single use only, by the redeemer, server-timestamped, changing nothing else; `list` denied |
+| Create/delete notifications | ✅ **only in its own** collection | ✅ `isSelf(uid)`, enumerated category, `read`/`delivered` must start `false`, no backdating, content immutable after creation |
+| Update/delete events or interpretations | ❌ | rejects (append-only) |
 
-Fail-closed by construction: if Phase 5's backend does not exist yet, the pair
-simply never activates — which is the safe outcome.
+This is why the migration is not a weakening. The both-consent rule enforces the
+exact invariant a trusted transaction would have: mutual, independently recorded,
+unforgeable agreement.
 
 ---
 
@@ -147,13 +165,26 @@ behalf of another user.
 | --- | --- | --- |
 | Firebase project id, API key, app id, sender id | **Client-safe identifiers** (they ship in every FlutterFire app) | `--dart-define` at build time; `AppConfig` |
 | `firebase.json`, `.firebaserc`, `firestore.rules`, `firestore.indexes.json` | Not secret | repository |
-| Firebase Admin / service-account keys | **Secret** | nowhere in this repository; server-side only |
-| Cloud Functions secrets | **Secret** | server-side only |
-| FCM server key | **Secret**, and legacy — modern sending uses service accounts | server-side only |
+| Firebase Admin / service-account keys | **Secret** | nowhere in this repository, and there is no server to hold them — see below |
+| FCM server key / sending credential | **Secret**, and legacy — modern sending uses a service account | nowhere in this repository |
 
-A repository-wide review (Phase 3, Task 25) found: no service-account files, no
-private keys, no `.env` files, and no hard-coded credential literals. `.gitignore`
-additionally blocks `*.pem`, `*.p12`, `*.jks`, `service-account*.json`,
+Neither secret class is merely "elsewhere": under the Spark-only architecture
+there is **no trusted server at all**, so a capability that would need one (remote
+push, cross-user retention) is deferred rather than given a credential
+([ADR-009](../decisions/ADR-009-spark-only-no-cloud-functions.md)). A secret
+shipped to a handset is a public secret, so obfuscation, `.env`, Remote Config,
+assets and native configuration are all equivalent to publishing it.
+
+Repository-wide reviews (Phase 3 Task 25, and again for the Spark migration) found:
+no service-account files, no private keys, no `.env` files, and no hard-coded
+credential literals. The migration review — covering `service.?account`,
+`private.?key`, `client.?secret`, `admin sdk`, `firebase.?admin`, `cloud.?run`,
+`scheduler`, `pub/sub`, `FCM_SERVER`, `api.?secret` — matched only documentation
+comments. These invariants are now **tests** rather than a one-off audit:
+`test/architecture/spark_only_test.dart` fails the build if a privileged
+credential appears where it could ship, or if a `functions`/`extensions` deploy
+target is added. `.gitignore` additionally blocks `*.pem`, `*.p12`, `*.jks`,
+`service-account*.json`,
 `*.env*`, `node_modules/`, emulator debug logs and `google-services.json`.
 
 The `client-safe-api-key` strings in `test/unit/firebase_config_test.dart` are
@@ -192,6 +223,27 @@ firebase emulators:exec --only firestore "node --test firebase/test/firestore.ru
 The emulator uses the `demo-kam` project id, which is the documented Firebase
 convention for a **local-only** project: it requires no account, no credentials
 and cannot touch production data.
+
+---
+
+## 8.1 Profile rules (added in Phase 4)
+
+The `users/{uid}` and `users/{uid}/settings/preferences` rules were **strengthened**
+for the authentication/profile work. Nothing was relaxed:
+
+| Rule | Why |
+| --- | --- |
+| create requires `createdAt == request.time && updatedAt == request.time` | a client cannot backdate its own profile |
+| update requires `updatedAt == request.time` and `createdAt` unchanged | ownership and creation time are immutable |
+| `displayName` must be 1..120 characters on both create and update | matches the client validator, so a value cannot pass the form and fail the server |
+| settings writes allow only `notificationPreference`, `homeLocation`, `updatedAt` | the private document cannot be used as arbitrary storage |
+| `notificationPreference` must be one of the four known values | prevents a value the app cannot interpret |
+| `homeLocation` must have numeric latitude ±90 and longitude ±180 | the most sensitive field the owner stores is range-checked |
+
+The write shapes in `FirestoreProfileRepository` were updated to satisfy these
+rules (`FieldValue.serverTimestamp()` everywhere, `update()` rather than `set()`),
+and 16 emulator tests cover them in
+`firebase/test/firestore.rules.test.js`.
 
 ---
 

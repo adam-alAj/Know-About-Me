@@ -8,19 +8,17 @@ import '../logging/app_logger.dart';
 abstract final class FirebaseEmulatorPorts {
   static const int firestore = 8080;
   static const int auth = 9099;
-  static const int functions = 5001;
 }
 
-// NOTE: there is no `messaging` port, deliberately. The Firebase Emulator Suite
-// has no Cloud Messaging emulator, so FCM cannot be exercised locally.
-// `firebase_messaging` is therefore not wired to the emulators in this file.
+// NOTE: there is no `messaging` port. The Firebase Emulator Suite has no Cloud
+// Messaging emulator, and messaging is not currently wired into the app.
 
 /// Points the Firebase SDKs at the local Emulator Suite.
 ///
 /// Local development must never write to production data (SRS constraint 6 in
 /// the Phase 3 brief). Guarded so a failure here cannot prevent startup.
 abstract final class FirebaseEmulators {
-  /// Connects Firestore and Auth (and Functions) to the emulators.
+  /// Connects Firestore and Auth to the emulators.
   ///
   /// Returns `true` when the connection was established.
   static bool connect(AppConfig config, {required AppLogger logger}) {

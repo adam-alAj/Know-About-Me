@@ -70,6 +70,18 @@ async function seedSharing(db, pairId, userId, categories, paused = false) {
   });
 }
 
+// A member's own consent document. Shared under Spark terms: consent is what
+// authorizes sharing now, and it can only ever be written by its own subject.
+async function seedConsent(db, pairId, userId, granted) {
+  await setDoc(doc(db, 'pairs', pairId, 'consents', userId), {
+    userId,
+    pairId,
+    granted,
+    categories: ['battery', 'network'],
+    grantedAt: granted ? ts() : null,
+  });
+}
+
 async function seedDeviceState(db, pairId, ownerId, fields) {
   await setDoc(doc(db, 'pairs', pairId, 'deviceState', ownerId), {
     ownerUserId: ownerId,
@@ -147,8 +159,12 @@ beforeEach(async () => {
       createdAt: ts(),
     });
 
-    // p1: uA <-> uB, active. uA shares battery + network (NOT location).
+    // p1: uA <-> uB, active, with BOTH consents granted. Consent is the
+    // standing authority for sharing, so an active pair alone is no longer
+    // enough to read partner data.
     await seedPair(db, 'p1', { memberIds: ['uA', 'uB'], status: 'active' });
+    await seedConsent(db, 'p1', 'uA', true);
+    await seedConsent(db, 'p1', 'uB', true);
     await seedSharing(db, 'p1', 'uA', ['battery', 'network']);
     await seedSharing(db, 'p1', 'uB', ['battery']);
     await seedDeviceState(db, 'p1', 'uA', { batteryPercentage: 82, networkState: 'online' });
@@ -163,6 +179,8 @@ beforeEach(async () => {
 
     // p2: two unrelated users.
     await seedPair(db, 'p2', { memberIds: ['uC', 'uD'], status: 'active' });
+    await seedConsent(db, 'p2', 'uC', true);
+    await seedConsent(db, 'p2', 'uD', true);
     await seedSharing(db, 'p2', 'uC', ['battery']);
     await seedDeviceState(db, 'p2', 'uC', { batteryPercentage: 10 });
 
@@ -227,6 +245,213 @@ test('a user can read their own private data', async () => {
   await assertSucceeds(getDoc(doc(db, 'users', 'uA', 'rules', 'r1')));
   await assertSucceeds(getDoc(doc(db, 'users', 'uA', 'fcmTokens', 'tok1')));
   await assertSucceeds(getDoc(doc(db, 'users', 'uA', 'notifications', 'n1')));
+});
+
+// ------------------------------------------------------- profile writes ----
+// The Phase 4 authentication/profile work depends on these rules, so they are
+// specified here rather than assumed: ownership, immutability of createdAt, and
+// server-authoritative timestamps.
+
+test('a user can create their own profile with server timestamps', async () => {
+  const db = as('uNew');
+  await assertSucceeds(
+    setDoc(doc(db, 'users', 'uNew'), {
+      displayName: 'Newcomer',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a user cannot create a profile for another user id', async () => {
+  const db = as('uA');
+  await assertFails(
+    setDoc(doc(db, 'users', 'uOther'), {
+      displayName: 'Impersonator',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a profile cannot be created without a display name', async () => {
+  const db = as('uNew');
+  await assertFails(
+    setDoc(doc(db, 'users', 'uNew'), {
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }),
+  );
+  await assertFails(
+    setDoc(doc(db, 'users', 'uNew'), {
+      displayName: '',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a profile cannot be backdated by the client', async () => {
+  const db = as('uNew');
+  await assertFails(
+    setDoc(doc(db, 'users', 'uNew'), {
+      displayName: 'Newcomer',
+      createdAt: ts(),
+      updatedAt: ts(),
+    }),
+  );
+});
+
+test('a user can update the editable fields of their own profile', async () => {
+  const db = as('uA');
+  await assertSucceeds(
+    updateDoc(doc(db, 'users', 'uA'), {
+      displayName: 'Afraa B',
+      timeZone: 'Europe/Paris',
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a profile update cannot change createdAt', async () => {
+  const db = as('uA');
+  await assertFails(
+    updateDoc(doc(db, 'users', 'uA'), {
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a profile update must carry a server timestamp', async () => {
+  const db = as('uA');
+  await assertFails(
+    updateDoc(doc(db, 'users', 'uA'), { displayName: 'Afraa B', updatedAt: ts() }),
+  );
+});
+
+test('a user cannot add arbitrary fields to their own profile', async () => {
+  const db = as('uA');
+  // hasOnly() on the post-update document is what stops a client from storing
+  // authorisation-ish data on its own profile.
+  await assertFails(
+    updateDoc(doc(db, 'users', 'uA'), {
+      admin: true,
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a user cannot write or delete another user\'s profile', async () => {
+  const db = as('uB');
+  await assertFails(
+    updateDoc(doc(db, 'users', 'uA'), {
+      displayName: 'Hijacked',
+      updatedAt: serverTimestamp(),
+    }),
+  );
+  await assertFails(deleteDoc(doc(db, 'users', 'uA')));
+});
+
+test('unauthenticated clients cannot read or write a profile', async () => {
+  const db = anon();
+  await assertFails(getDoc(doc(db, 'users', 'uA')));
+  await assertFails(
+    setDoc(doc(db, 'users', 'uNew'), {
+      displayName: 'Anonymous',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }),
+  );
+  await assertFails(
+    updateDoc(doc(db, 'users', 'uA'), {
+      displayName: 'Anonymous',
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+// ----------------------------------------------------------------- settings --
+
+test('the owner can store valid preferences', async () => {
+  const db = as('uA');
+  await assertSucceeds(
+    setDoc(
+      doc(db, 'users', 'uA', 'settings', 'preferences'),
+      {
+        notificationPreference: 'importantOnly',
+        homeLocation: { latitude: 52.5, longitude: 13.4, radiusKm: 0.3 },
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    ),
+  );
+});
+
+test('preferences reject unknown keys and unknown document ids', async () => {
+  const db = as('uA');
+  await assertFails(
+    updateDoc(doc(db, 'users', 'uA', 'settings', 'preferences'), {
+      admin: true,
+      updatedAt: serverTimestamp(),
+    }),
+  );
+  await assertFails(
+    setDoc(doc(db, 'users', 'uA', 'settings', 'other'), {
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('preferences must carry a server timestamp', async () => {
+  const db = as('uA');
+  await assertFails(
+    updateDoc(doc(db, 'users', 'uA', 'settings', 'preferences'), {
+      updatedAt: ts(),
+    }),
+  );
+});
+
+test('notificationPreference must be a known value', async () => {
+  const db = as('uA');
+  await assertFails(
+    updateDoc(doc(db, 'users', 'uA', 'settings', 'preferences'), {
+      notificationPreference: 'everything',
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('home location must be a valid coordinate', async () => {
+  const db = as('uA');
+  await assertFails(
+    updateDoc(doc(db, 'users', 'uA', 'settings', 'preferences'), {
+      homeLocation: { latitude: 120, longitude: 13.4 },
+      updatedAt: serverTimestamp(),
+    }),
+  );
+  await assertFails(
+    updateDoc(doc(db, 'users', 'uA', 'settings', 'preferences'), {
+      homeLocation: { latitude: 52.5, longitude: 200 },
+      updatedAt: serverTimestamp(),
+    }),
+  );
+  await assertSucceeds(
+    updateDoc(doc(db, 'users', 'uA', 'settings', 'preferences'), {
+      homeLocation: { latitude: -33.86, longitude: 151.2 },
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a user cannot write another user\'s preferences', async () => {
+  const db = as('uB');
+  await assertFails(
+    updateDoc(doc(db, 'users', 'uA', 'settings', 'preferences'), {
+      notificationPreference: 'noNotifications',
+      updatedAt: serverTimestamp(),
+    }),
+  );
 });
 
 // -------------------------------------------------------- pair isolation ----
@@ -367,6 +592,12 @@ test('the owner cannot write their location while location sharing is off', asyn
   );
 });
 
+// -------------------------------------- pair activation (Spark, no server) ---
+// ADR-002 reserved activation for a Cloud Function. Under the Spark-only
+// architecture (ADR-009) the rules perform the same check a trusted transaction
+// would: both members' consent documents must already be granted. Neither user
+// can write the other's consent, so the invariant cannot be forged.
+
 test('a client cannot activate a pair by itself', async () => {
   const db = as('uE');
   await assertFails(
@@ -375,6 +606,201 @@ test('a client cannot activate a pair by itself', async () => {
       updatedAt: serverTimestamp(),
     }),
   );
+});
+
+test('an active pair cannot be created by one-sided consent', async () => {
+  // Only uA agrees; uE has not.
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await seedConsent(context.firestore(), 'p3', 'uA', true);
+  });
+
+  await assertFails(
+    updateDoc(doc(as('uA'), 'pairs', 'p3'), {
+      status: 'active',
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a denied consent blocks activation even if the caller agrees', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await seedConsent(db, 'p3', 'uA', true);
+    await seedConsent(db, 'p3', 'uE', false);
+  });
+
+  await assertFails(
+    updateDoc(doc(as('uA'), 'pairs', 'p3'), {
+      status: 'active',
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a pair becomes active once BOTH members have granted consent', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await seedConsent(db, 'p3', 'uA', true);
+    await seedConsent(db, 'p3', 'uE', true);
+  });
+
+  await assertSucceeds(
+    updateDoc(doc(as('uA'), 'pairs', 'p3'), {
+      status: 'active',
+      updatedAt: serverTimestamp(),
+    }),
+  );
+
+  // Access then follows the sharing categories, exactly as for a seeded pair.
+  await assertSucceeds(
+    getDoc(doc(as('uE'), 'pairs', 'p3', 'deviceState', 'uA')),
+  );
+});
+
+test('activation cannot be attempted without a server timestamp', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await seedConsent(db, 'p3', 'uA', true);
+    await seedConsent(db, 'p3', 'uE', true);
+  });
+
+  await assertFails(
+    updateDoc(doc(as('uA'), 'pairs', 'p3'), { status: 'active', updatedAt: ts() }),
+  );
+});
+
+test('revoking consent stops partner reads immediately', async () => {
+  await assertSucceeds(getDoc(doc(as('uB'), 'pairs', 'p1', 'deviceState', 'uA')));
+
+  // uA withdraws consent but leaves the pair 'active' and the category shared.
+  // Reads must stop anyway: consent is the standing authority (NFR-002).
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await seedConsent(context.firestore(), 'p1', 'uA', false);
+  });
+
+  await assertFails(getDoc(doc(as('uB'), 'pairs', 'p1', 'deviceState', 'uA')));
+});
+
+// ------------------------------------------- pairing codes (Spark, no server) ---
+
+const CODE = 'ABCDEFGH23456789XYZ1';
+const inThirtyMinutes = () => Timestamp.fromMillis(Date.now() + 30 * 60 * 1000);
+
+async function publishCode(db, userId, code, overrides = {}) {
+  return setDoc(doc(db, 'pairingCodes', code), {
+    code,
+    createdByUserId: userId,
+    revoked: false,
+    usedByUserId: null,
+    createdAt: serverTimestamp(),
+    expiresAt: inThirtyMinutes(),
+    ...overrides,
+  });
+}
+
+test('a signed-in user can publish a well-formed pairing code', async () => {
+  await assertSucceeds(publishCode(as('uA'), 'uA', CODE));
+});
+
+test('a pairing code must be long enough to be unguessable', async () => {
+  await assertFails(publishCode(as('uA'), 'uA', 'TOOSHORT12345678901'));
+});
+
+test('a pairing code must expire within an hour', async () => {
+  await assertFails(
+    publishCode(as('uA'), 'uA', CODE, {
+      expiresAt: Timestamp.fromMillis(Date.now() + 2 * 60 * 60 * 1000),
+    }),
+  );
+  await assertFails(
+    publishCode(as('uA'), 'uA', CODE, {
+      expiresAt: Timestamp.fromMillis(Date.now() - 1000),
+    }),
+  );
+});
+
+test('a user cannot publish a code on behalf of another user', async () => {
+  await assertFails(publishCode(as('uB'), 'uA', CODE));
+});
+
+test('an unauthenticated client cannot read or publish pairing codes', async () => {
+  await assertFails(getDoc(doc(anon(), 'pairingCodes', CODE)));
+  await assertFails(publishCode(anon(), 'uA', CODE));
+});
+
+test('pairing codes cannot be listed, so outstanding codes cannot be harvested', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await publishCode(context.firestore(), 'uA', CODE);
+  });
+  await assertFails(getDocs(collection(as('uB'), 'pairingCodes')));
+});
+
+test('a pairing code can be redeemed exactly once', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await publishCode(context.firestore(), 'uA', CODE);
+  });
+
+  await assertSucceeds(
+    updateDoc(doc(as('uE'), 'pairingCodes', CODE), {
+      usedByUserId: 'uE',
+      usedAt: serverTimestamp(),
+    }),
+  );
+
+  // A second user cannot consume the same code.
+  await assertFails(
+    updateDoc(doc(as('uF'), 'pairingCodes', CODE), {
+      usedByUserId: 'uF',
+      usedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('redeeming a code cannot smuggle other changes', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await publishCode(context.firestore(), 'uA', CODE);
+  });
+
+  await assertFails(
+    updateDoc(doc(as('uE'), 'pairingCodes', CODE), {
+      usedByUserId: 'uE',
+      usedAt: serverTimestamp(),
+      expiresAt: Timestamp.fromMillis(Date.now() + 60 * 60 * 1000),
+    }),
+  );
+});
+
+test('an expired pairing code cannot be redeemed', async () => {
+  const expired = 'EXPIREDCODE123456789';
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    // Seeded past its expiry: rules never allow creating one like this, which is
+    // exactly why the redemption path re-checks the timestamp.
+    await setDoc(doc(context.firestore(), 'pairingCodes', expired), {
+      code: expired,
+      createdByUserId: 'uA',
+      revoked: false,
+      usedByUserId: null,
+      createdAt: ts(),
+      expiresAt: Timestamp.fromMillis(Date.now() - 1000),
+    });
+  });
+
+  await assertFails(getDoc(doc(as('uE'), 'pairingCodes', expired)));
+  await assertFails(
+    updateDoc(doc(as('uE'), 'pairingCodes', expired), {
+      usedByUserId: 'uE',
+      usedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('only the issuer can revoke their pairing code', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await publishCode(context.firestore(), 'uA', CODE);
+  });
+
+  await assertFails(deleteDoc(doc(as('uB'), 'pairingCodes', CODE)));
+  await assertSucceeds(deleteDoc(doc(as('uA'), 'pairingCodes', CODE)));
 });
 
 test('pair membership cannot be changed by a member', async () => {
@@ -440,19 +866,102 @@ test('a member cannot record an event as another user', async () => {
   );
 });
 
-test('notifications cannot be created or deleted by a client', async () => {
-  const db = as('uA');
-  await assertFails(
-    setDoc(doc(db, 'users', 'uA', 'notifications', 'fake'), {
+// Under Spark there is no server to write notifications, so the owner's own
+// device does. That is only safe because the collection is strictly per-user.
+
+test('the owner can record a local notification for themselves', async () => {
+  await assertSucceeds(
+    setDoc(doc(as('uA'), 'users', 'uA', 'notifications', 'local1'), {
+      recipientUserId: 'uA',
       pairId: 'p1',
-      title: 'Fake',
-      body: 'Fake',
+      title: 'Possible sleep',
+      body: 'There is a 70% possibility that Adam is sleeping now.',
       category: 'ruleInterpretation',
       read: false,
+      delivered: false,
+      createdAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a user cannot write a notification into someone else\'s collection', async () => {
+  await assertFails(
+    setDoc(doc(as('uB'), 'users', 'uA', 'notifications', 'injected'), {
+      recipientUserId: 'uA',
+      pairId: 'p1',
+      title: 'Injected',
+      body: 'Injected',
+      category: 'ruleInterpretation',
+      read: false,
+      delivered: false,
+      createdAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a notification cannot claim another user as its recipient', async () => {
+  await assertFails(
+    setDoc(doc(as('uA'), 'users', 'uA', 'notifications', 'mislabelled'), {
+      recipientUserId: 'uB',
+      pairId: 'p1',
+      title: 'Mislabeled',
+      body: 'Mislabeled',
+      category: 'ruleInterpretation',
+      read: false,
+      delivered: false,
+      createdAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a notification cannot be created as already read or delivered', async () => {
+  await assertFails(
+    setDoc(doc(as('uA'), 'users', 'uA', 'notifications', 'preset'), {
+      recipientUserId: 'uA',
+      pairId: 'p1',
+      title: 'Preset',
+      body: 'Preset',
+      category: 'ruleInterpretation',
+      read: true,
+      delivered: true,
+      createdAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a notification cannot be backdated by the client', async () => {
+  await assertFails(
+    setDoc(doc(as('uA'), 'users', 'uA', 'notifications', 'backdated'), {
+      recipientUserId: 'uA',
+      pairId: 'p1',
+      title: 'Backdated',
+      body: 'Backdated',
+      category: 'ruleInterpretation',
+      read: false,
+      delivered: false,
       createdAt: ts(),
     }),
   );
-  await assertFails(deleteDoc(doc(db, 'users', 'uA', 'notifications', 'n1')));
+});
+
+test('a notification cannot use an unknown category', async () => {
+  await assertFails(
+    setDoc(doc(as('uA'), 'users', 'uA', 'notifications', 'badcat'), {
+      recipientUserId: 'uA',
+      pairId: 'p1',
+      title: 'Bad category',
+      body: 'Bad category',
+      category: 'marketing',
+      read: false,
+      delivered: false,
+      createdAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('the owner can clear their own notification history', async () => {
+  await assertSucceeds(deleteDoc(doc(as('uA'), 'users', 'uA', 'notifications', 'n1')));
+  await assertFails(deleteDoc(doc(as('uB'), 'users', 'uA', 'notifications', 'n1')));
 });
 
 test('a user can only mark their own notification as read', async () => {
@@ -462,9 +971,39 @@ test('a user can only mark their own notification as read', async () => {
   await assertFails(
     updateDoc(doc(as('uB'), 'users', 'uA', 'notifications', 'n1'), { read: true }),
   );
-  // Other fields are not writable even by the owner.
+});
+
+test('the owner can record delivery but cannot rewrite the message', async () => {
+  await assertSucceeds(
+    updateDoc(doc(as('uA'), 'users', 'uA', 'notifications', 'n1'), {
+      read: true,
+      delivered: true,
+    }),
+  );
+  // A record cannot be rewritten into a different message after the fact.
   await assertFails(
     updateDoc(doc(as('uA'), 'users', 'uA', 'notifications', 'n1'), { title: 'edited' }),
+  );
+  await assertFails(
+    updateDoc(doc(as('uA'), 'users', 'uA', 'notifications', 'n1'), {
+      body: 'edited body',
+    }),
+  );
+});
+
+test('a user cannot tamper with a consent document, even their own subject', async () => {
+  // Consent subjects are fixed by the document id; a member can never write the
+  // other member's consent, which is what makes activation unforgeable.
+  await assertFails(
+    updateDoc(doc(as('uB'), 'pairs', 'p1', 'consents', 'uA'), { granted: false }),
+  );
+  await assertFails(
+    setDoc(doc(as('uB'), 'pairs', 'p1', 'consents', 'uA'), {
+      userId: 'uA',
+      pairId: 'p1',
+      granted: false,
+      categories: [],
+    }),
   );
 });
 

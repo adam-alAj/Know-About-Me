@@ -20,7 +20,9 @@ users/{userId}                                  private profile
 users/{userId}/settings/preferences             home location, notification prefs
 users/{userId}/rules/{ruleId}                   rule definitions (private)
 users/{userId}/fcmTokens/{tokenId}              push tokens (private, never shared)
-users/{userId}/notifications/{notificationId}   per-user notifications (server-created)
+users/{userId}/notifications/{notificationId}   per-user notifications (owner-written)
+
+pairingCodes/{code}                             short-lived connection codes (top level)
 
 pairs/{pairId}                                  the security boundary
 pairs/{pairId}/members/{userId}                 partner-visible name/photo
@@ -66,8 +68,9 @@ Location therefore lives in `pairs/{pairId}/location/{userId}` with its own rule
 | Private profile | `users/{uid}` | the user | owner only | owner | yes (key-validated) | until user deletes |
 | Settings | `users/{uid}/settings/preferences` | the user | owner only | owner | yes | until user deletes |
 | Rules | `users/{uid}/rules/{ruleId}` | the user | owner only | owner | yes | until user deletes |
-| FCM tokens | `users/{uid}/fcmTokens/{tokenId}` | the user | owner only | owner | yes | until token is revoked |
-| Notifications | `users/{uid}/notifications/{id}` | the user | owner only | **server only** (create/delete); owner may set `read` | read flag only | later retention policy |
+| FCM tokens (reserved; unused) | `users/{uid}/fcmTokens/{tokenId}` | the user | owner only | owner | yes | until token is revoked |
+| Notifications | `users/{uid}/notifications/{id}` | the user | owner only | **owner only** — the user's own device writes them under Spark, so nobody else can inject content | `read` and `delivered` only; title/body/createdAt immutable | owner may delete; later retention policy |
+| Pairing codes | `pairingCodes/{code}` | the issuer | issuer; any signed-in user may `get` a live code | issuer creates; redeemer sets `usedByUserId`/`usedAt` once | single-use, ≤1 h expiry; **`list` denied** | deleted on revoke; expired codes are inert |
 | Pair | `pairs/{pairId}` | both members | members only | members, restricted | limited (see §4) | ended, not deleted |
 | Member profile | `pairs/{pairId}/members/{uid}` | the user | pair members | the user themself | yes | while pair exists |
 | Consent | `pairs/{pairId}/consents/{uid}` | the user | pair members | the user themself | yes | while pair exists |
@@ -149,13 +152,19 @@ Lifecycle enforcement (SRS NFR-042) is split deliberately:
 | Transition | Who may perform it | Why |
 | --- | --- | --- |
 | `→ pending` | either user (on create) | a user may ask to connect |
-| `pending → active` | **server only** | requires *both* consents; a client cannot be trusted to assert that (ADR-002) |
-| `active ↔ paused` | server only (Phase 5) | pausing is a mutual-relationship operation |
+| `pending → active` | either member, **only once both consent documents are granted** | the rules read both consents; each can only be written by its own subject, so agreement cannot be forged (ADR-009) |
+| `paused → active` | either member, same both-consent gate | resuming still requires mutual consent |
+| `active → paused` | either member | pausing a mutual relationship does not need the other's agreement |
 | `pending/active/paused → disconnected/revoked` | either member | either user can always leave |
 | delete | nobody | pairs are ended, never deleted, so history stays auditable |
 
-Because no rule permits a client to write `status: 'active'`, activation is
-fail-closed: a modified client cannot create an authorized pair on its own.
+Activation is therefore reachable without a server, but not without mutual
+consent: a modified client cannot create an authorized pair on its own, because
+the rule re-reads the *other* member's consent document and rejects the write if
+it is missing or denied. Consent is additionally re-checked on every partner read
+(`notPaused()`), so revoking consent stops sharing immediately. This replaced the
+Cloud Functions activation path — see
+[ADR-009](../decisions/ADR-009-spark-only-no-cloud-functions.md).
 
 `pairs/{pairId}/consents/{userId}` records **each user's own decision**
 (`granted`, `grantedAt`, `revokedAt`, `categories`, `locationSharing`). Pairing is
@@ -301,9 +310,10 @@ treat cached data as automatically current:
 2. **`memberProfiles` denormalisation.** A partner's display-name change must be
    written to `pairs/{pairId}/members/{uid}` for each pair. Phase 5 should update
    it when a profile changes.
-3. **Pair activation requires the backend.** No Cloud Function exists yet, so a
-   pair cannot become `active` in a client-only flow. This is intentional and
-   fail-closed.
+3. **Pair activation requires both consent documents**, not a backend. There is
+   no Cloud Function (and, under Spark, there never will be): the transition is
+   gated by a rule instead. A pair whose members have not *both* consented simply
+   never activates — fail-closed, as before.
 4. **Retention and deletion** of events/interpretations are not implemented
    (deferred to Phase 12).
 5. **`basis` is stored as a plain array** on each interpretation. If

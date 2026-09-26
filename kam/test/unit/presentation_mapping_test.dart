@@ -5,9 +5,11 @@ import 'package:kam/core/error/app_failure.dart';
 import 'package:kam/core/result/result.dart';
 import 'package:kam/core/ui/data_presentation_state.dart';
 import 'package:kam/core/ui/presentation_mapping.dart';
+import 'package:kam/features/auth/domain/models/auth_identity.dart';
 import 'package:kam/features/auth/presentation/providers/auth_providers.dart';
 
 import '../fakes/fake_auth_repository.dart';
+import '../fakes/fake_profile_repository.dart';
 
 void main() {
   group('PresentationMapping.fromAsync', () {
@@ -39,7 +41,7 @@ void main() {
     });
 
     test(
-      'a stream error is reported as a failure rather than masked by loading',
+      'a failing read is reported as a failure rather than masked by loading',
       () async {
         // Riverpod 3 keeps the loading flag set while also recording the error,
         // so this is the case a naive `.when()` would hide.
@@ -47,7 +49,12 @@ void main() {
           overrides: [
             authRepositoryProvider.overrideWithValue(
               FakeAuthRepository(
-                failure: const RemoteServiceFailure(
+                initialIdentity: const AuthIdentity(uid: 'user-a'),
+              ),
+            ),
+            profileRepositoryProvider.overrideWithValue(
+              FakeProfileRepository(
+                readFailure: const RemoteServiceFailure(
                   'Account service is unavailable',
                 ),
               ),
@@ -56,17 +63,61 @@ void main() {
         );
         addTearDown(container.dispose);
 
-        container.listen(currentUserProvider, (_, _) {}, fireImmediately: true);
+        container.listen(
+          currentUserProfileProvider,
+          (_, _) {},
+          fireImmediately: true,
+        );
         await Future<void>.delayed(const Duration(milliseconds: 20));
 
-        final presentation = PresentationMapping.fromAsync(
-          container.read(currentUserProvider),
+        final presentation = PresentationMapping.fromAsyncNullableResult(
+          container.read(currentUserProfileProvider),
         );
 
         expect(presentation.state, DataPresentationState.failure);
         expect(presentation.message, 'Account service is unavailable');
       },
     );
+  });
+
+  group('PresentationMapping.fromAsyncNullableResult', () {
+    test('maps a present value to loaded', () {
+      final presentation = PresentationMapping.fromAsyncNullableResult(
+        const AsyncData<Result<String?>>(Success<String?>('value')),
+      );
+
+      expect(presentation.state, DataPresentationState.loaded);
+    });
+
+    test('maps a successful null to empty rather than loaded', () {
+      // The read worked and there genuinely is nothing: rendering this as
+      // content would invent a value the system does not have (FR-048).
+      final presentation = PresentationMapping.fromAsyncNullableResult(
+        const AsyncData<Result<String?>>(Success<String?>(null)),
+      );
+
+      expect(presentation.state, DataPresentationState.empty);
+    });
+
+    test('maps a failed result to failure', () {
+      final presentation = PresentationMapping.fromAsyncNullableResult(
+        const AsyncData<Result<String?>>(
+          Failure<String?>(NotFoundFailure('No profile yet')),
+        ),
+      );
+
+      expect(presentation.state, DataPresentationState.failure);
+      expect(presentation.message, 'No profile yet');
+    });
+
+    test('maps an in-progress read to loading', () {
+      expect(
+        PresentationMapping.fromAsyncNullableResult(
+          const AsyncLoading<Result<String?>>(),
+        ).state,
+        DataPresentationState.loading,
+      );
+    });
   });
 
   group('PresentationMapping.fromAsyncResult', () {

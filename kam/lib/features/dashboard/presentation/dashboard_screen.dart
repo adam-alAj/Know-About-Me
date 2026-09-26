@@ -7,10 +7,13 @@ import '../../../app/router/app_routes.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/ui/data_state_view.dart';
 import '../../../core/ui/presentation_mapping.dart';
+import '../../../core/ui/widgets/app_button.dart';
 import '../../../core/ui/widgets/app_card.dart';
+import '../../../core/ui/widgets/app_inline_message.dart';
 import '../../../core/ui/widgets/app_scaffold.dart';
 import '../../../core/ui/widgets/empty_view.dart';
 import '../../../core/ui/widgets/section_header.dart';
+import '../../auth/presentation/providers/auth_providers.dart';
 import '../../device_state/domain/models/device_state.dart';
 import '../../device_state/presentation/providers/device_state_providers.dart';
 import '../../device_state/presentation/widgets/metric_tile.dart';
@@ -44,6 +47,24 @@ class DashboardScreen extends ConsumerWidget {
       ],
       body: ListView(
         children: [
+          // An authenticated account whose profile was never stored is reported
+          // here as well as on the profile screen, so a partial registration is
+          // never silently treated as finished (Phase 4 Task 5, Task 14).
+          if (_isProfileMissing(ref)) ...[
+            const AppInlineMessage(
+              title: 'Finish setting up your profile',
+              message:
+                  'Your account exists, but no profile was saved for it. Add a '
+                  'display name so the person you connect with sees who you are.',
+              tone: AppMessageTone.warning,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            AppButton.secondary(
+              label: 'Go to profile',
+              onPressed: () => context.pushNamed(AppRoutes.profile),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+          ],
           const SectionHeader(
             title: 'Your device',
             subtitle: 'What this app can observe about this phone today',
@@ -81,6 +102,18 @@ class DashboardScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Whether the signed-in user has no profile document.
+///
+/// Only a *resolved* read that returned `null` counts: a load in progress or a
+/// failed read must not be presented as "your profile is missing" (FR-048).
+bool _isProfileMissing(WidgetRef ref) {
+  final identity = ref.watch(currentIdentityProvider);
+  if (identity == null) return false;
+  final profile = ref.watch(currentUserProfileProvider);
+  if (!profile.hasValue) return false;
+  return profile.requireValue.valueOrNull == null;
 }
 
 /// Renders the observable device metrics.

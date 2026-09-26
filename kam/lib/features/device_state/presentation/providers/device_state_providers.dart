@@ -10,9 +10,9 @@ import '../../domain/sources/device_state_source.dart';
 
 /// The device-state source for this platform.
 ///
-/// Phase 2 resolves to [UnavailableDeviceStateSource], which reports everything
-/// as unsupported. Phase 4 replaces this override with the real Android/iOS
-/// collector. Tests override it with a fake.
+/// Resolves to [UnavailableDeviceStateSource], which reports everything as
+/// unsupported. The device-monitoring phase replaces this override with the real
+/// Android/iOS collector. Tests override it with a fake.
 final deviceStateSourceProvider = Provider<DeviceStateSource>(
   (ref) => UnavailableDeviceStateSource(
     platform: ref.watch(platformInfoProvider).platform,

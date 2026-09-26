@@ -1,19 +1,22 @@
 # Architecture
 
 Mutual Device Presence & Reassurance System. This document describes the
-architecture **as implemented** after Phase 3. Phase 1 built the domain foundation;
+architecture **as implemented** after Phase 4. Phase 1 built the domain foundation;
 Phase 2 built the application architecture around it; Phase 3 added the Firebase
-backend foundation (see §14 for the summary and the dedicated documents for detail).
+backend foundation; Phase 4 added authentication and the user profile
+(§20 summarises it; the dedicated documents have the detail).
 
 Related documents:
 
+- `docs/architecture/AUTHENTICATION_ARCHITECTURE.md` — identity, auth state, router guard.
+- `docs/architecture/USER_PROFILE_MODEL.md` — profile documents, ownership, write paths.
 - `docs/architecture/FIREBASE_ARCHITECTURE.md` — Firebase services, environments, boundaries.
 - `docs/architecture/FIRESTORE_DATA_MODEL.md` — collections, ownership, retention.
 - `docs/architecture/FIREBASE_SECURITY.md` — authorization model and Security Rules.
 - `docs/platform/PLATFORM_CAPABILITIES.md` — what Android and iOS actually allow.
 - `docs/requirements/REQUIREMENT_MAPPING.md` — SRS requirement → domain → phase.
 - `docs/decisions/` — Architecture Decision Records.
-- `docs/PHASE_01_COMPLETION_REPORT.md`, `docs/PHASE_02_COMPLETION_REPORT.md`, `docs/PHASE_03_COMPLETION_REPORT.md`.
+- `docs/PHASE_01_COMPLETION_REPORT.md` … `docs/PHASE_04_COMPLETION_REPORT.md`.
 
 ---
 
@@ -44,9 +47,11 @@ lib/
 │   ├── bootstrap.dart              startup sequence
 │   ├── error_boundary.dart         global build-error fallback
 │   ├── providers.dart              core providers (config, clock, logger, platform)
+│   │                               + appRouterProvider / appInitialLocationProvider
 │   ├── router/
 │   │   ├── app_routes.dart         route names + paths
-│   │   ├── app_router.dart         GoRouter definition + shell branches
+│   │   ├── app_router.dart         GoRouter definition, shell branches, router provider
+│   │   ├── auth_redirect.dart      pure authentication guard (see §20)
 │   │   ├── app_shell.dart          bottom-navigation shell
 │   │   └── unknown_route_screen.dart
 │   └── theme/
@@ -58,7 +63,8 @@ lib/
 │   ├── error/                      AppException (thrown) + AppFailure (returned)
 │   ├── extensions/                 DurationX formatting
 │   ├── firebase/                   Firebase boundary (see §14): bootstrap,
-│   │                               options, emulator wiring, error mapping
+│   │                               options, emulator wiring, error mapping,
+│   │                               and the raw SDK handles as providers
 │   ├── freshness/                  DataFreshness + FreshnessPolicy
 │   ├── logging/                    AppLogger abstraction + implementations
 │   ├── platform/                   DevicePlatform, PlatformInfo
@@ -69,10 +75,15 @@ lib/
 │       ├── data_state_view.dart
 │       ├── presentation_mapping.dart
 │       └── widgets/                app_scaffold, app_card, app_button,
-│                                   section_header, loading/error/empty/
-│                                   unavailable views, freshness_indicator
+│                                   section_header, app_inline_message,
+│                                   loading/error/empty/unavailable views,
+│                                   freshness_indicator
 └── features/
-    ├── auth/          domain(models+repository) · data(repository impl) · presentation(profile, providers)
+    ├── auth/          identity + profile (see §20):
+    │                  domain(models, repositories, service, validation)
+    │                  data(Firebase auth repo, Firestore profile repo,
+    │                       unavailable repos) · presentation(splash, sign-in,
+    │                       create-account, profile, providers)
     ├── pairing/       domain(models)
     ├── device_state/  domain(models+capability+source) · data(source impl) · presentation(metric tile, providers)
     ├── (data/ layers are where Firebase SDKs are allowed to appear — §14)
@@ -110,9 +121,12 @@ Design rules:
 - `FirebaseBootstrap.initialize(config, logger:)` is the third step. It is
 guarded: when Firebase is unconfigured or initialization fails it returns `false`
 and logs, and the app continues offline. It never throws into startup.
-- Services that do not exist yet (auth state, local persistence, notification
-  handling, background monitoring registration) have a commented slot in the
-  sequence rather than speculative code.
+- Authentication state is **not** initialized here: it is pushed by the provider
+  and mirrored by `AuthController`, so there is exactly one code path for a warm
+  start and a cold start (see `AUTHENTICATION_ARCHITECTURE.md` §3).
+- Services that do not exist yet (local persistence, notification handling,
+  background monitoring registration) have a commented slot in the sequence
+  rather than speculative code.
 - `AppErrorBoundary.install()` replaces Flutter's error widget with a calm
   fallback so a broken subtree does not show a red screen.
 
@@ -133,7 +147,9 @@ and logs, and the app continues offline. It never throws into startup.
 - **Client-safe**: Firebase project id, API key, app id, sender id, API base URLs,
   feature flags. These identify a project and are not credentials.
 - **Never client-side**: Firebase Admin/service-account credentials, private API
-  keys, Cloud Functions secrets. `.gitignore` also blocks `*.env`, `*.pem`,
+  keys, and any credential that could send a push. There is no Cloud Functions
+  project to hold a secret, which is the point of the Spark-only architecture.
+  `.gitignore` also blocks `*.env`, `*.pem`,
   `*.jks`, `service-account*.json` as defence in depth.
 
 See `ADR-004-configuration-strategy.md`.
@@ -152,7 +168,9 @@ locator, and no `get_it`.
 | Time | `clockProvider` | `SystemClock` |
 | Logging | `loggerProvider` | `DeveloperAppLogger` (level from config) |
 | Platform detection | `platformInfoProvider` | `FlutterPlatformInfo` |
-| Identity | `authRepositoryProvider` (`features/auth/.../auth_providers.dart`) | `UnauthenticatedAuthRepository` |
+| Identity | `authRepositoryProvider` (`features/auth/presentation/providers/`) | `FirebaseAuthRepository`, or `UnavailableAuthRepository` when Firebase is not ready |
+| Profile | `profileRepositoryProvider` | `FirestoreProfileRepository`, or `UnavailableProfileRepository` |
+| Registration/sign-in orchestration | `authServiceProvider` | `AuthService` over the two repositories |
 | Device state | `deviceStateSourceProvider` (`features/device_state/.../device_state_providers.dart`) | `UnavailableDeviceStateSource` |
 
 Rules:
@@ -174,18 +192,27 @@ See `ADR-005-dependency-injection-and-error-handling.md`.
 `go_router` with a `StatefulShellRoute.indexedStack`:
 
 ```
+/splash          splash       ← shown while the session is unknown
+/sign-in         sign in      ← unauthenticated flow
+/create-account  create account
 /                dashboard    ┐
 /rules           rules        ├─ shell branches (bottom navigation, own state)
 /history         history      │
 /privacy         privacy      ┘
 /profile         profile      ← pushed above the shell
-/sign-in, /pairing            ← reserved names for the Phase 4 auth guard
+/pairing                      ← reserved for the connection phase
 ```
+
+The authentication guard lives in `app/router/auth_redirect.dart` as a pure
+function, so every case is a unit test rather than a manual click-through: see
+`AUTHENTICATION_ARCHITECTURE.md` §8.
 
 - Route names and paths live in `AppRoutes` (`app/router/app_routes.dart`); no
   widget uses a string literal path.
-- Authentication-aware navigation is supported by passing a `redirect` callback
-  to `createAppRouter()`. Phase 4 supplies the guard; no route needs restructuring.
+- Authentication-aware navigation is wired through `appRouterProvider`, which
+  passes the guard and a `refreshListenable` to `createAppRouter()`. The router is
+  built inside a provider so it can read authentication state directly, and tests
+  exercise the same router the app ships.
 - Unmatched locations render `UnknownRouteScreen` via `errorBuilder`.
 - The shell holds no business state; each branch screen owns its own `AppBar` and
   content through `AppScaffold`.
@@ -398,23 +425,35 @@ never sees a `FirebaseException`, a `DocumentSnapshot` or a collection path.
 
 ### Trust split
 
-| Concern | Client | Server (Security Rules / Admin SDK) |
+| Concern | Client | Security Rules (the only authority) |
 | --- | --- | --- |
 | Observation (battery, charging, network, location) | ✅ collects | — |
 | Reading own profile, pair, partner's shared state | reads, gated by rules | — |
-| **Authorization** (pair membership, category sharing) | displays only | ✅ enforced on every request |
-| Pair activation | ❌ cannot | ✅ Admin SDK / Cloud Function |
-| Interpreting state (rules) | evaluates for display | may later re-evaluate |
+| **Authorization** (pair membership, category sharing, consent) | displays only | ✅ enforced on every request |
+| Pair activation (`pending → active`) | requests the transition | ✅ **only if both members' consent documents are granted** |
+| Issuing/redeeming a pairing code | generates (CSPRNG) and redeems | ✅ length, expiry, single-use, `list` denied |
+| Writing notifications | writes **only into its own** collection | ✅ `isSelf(uid)` on every write |
+| Interpreting state (rules) | ✅ evaluates locally | — (no server exists) |
 
-`pairs.status` is never client-settable, so a client cannot join a pair, a partner
-cannot read a paused/revoked pair, and a client cannot widen its own sharing. The
-rules are tested against the emulator (31 scenarios, `FIREBASE_SECURITY.md` §7).
+There is **no server**: the architecture is designed for Firebase Spark and no
+live Firebase project is configured, so there is no Cloud Functions project and no Admin SDK
+([ADR-009](../decisions/ADR-009-spark-only-no-cloud-functions.md)). Every former
+server responsibility is instead *verified* by the rules — see
+`SPARK_ONLY_ARCHITECTURE.md`.
+
+The consequence worth stating plainly: no operation is authorized by the client.
+Activation is gated on facts the client cannot forge (each consent document can
+only be written by its own subject), so a modified client still cannot join a
+pair, read a paused/revoked pair, or widen its own sharing. The rules are tested
+against the emulator (70 scenarios, `FIREBASE_SECURITY.md` §7).
 
 ### Still not implemented
 
-No authentication flow (Phase 4), no pairing/consent workflow (Phase 5), no device
-monitoring (Phase 6), no Cloud Functions project, no FCM registration. Phase 3
-prepared their structure and the security model they must obey.
+No pairing/consent *workflow* (Phase 5), no device monitoring (Phase 6), no
+location tracking, no rule management UI, no FCM registration. Authentication and
+profiles were completed in Phase 4. The Spark migration prepared the security
+model those features must obey, so Phase 5 can build the workflow without
+re-architecting the backend.
 
 Facts and interpretations never mix: `ValueOrigin` / `MetricValue.isInterpretation`
 and `Interpretation.isObjectiveFact` make the distinction part of the type system,
@@ -446,7 +485,14 @@ future model-generated estimate (`FIRESTORE_DATA_MODEL.md` §8).
 | Async → presentation | `test/unit/presentation_mapping_test.dart` | Covers the Riverpod 3 loading+error case |
 | UI states | `test/widget/data_state_view_test.dart` | loading / failure / empty / unknown / unsupported / unavailable / paused / stale |
 | Routing | `test/widget/router_test.dart` | initial route, branch navigation, profile push, unknown route |
-| DI seams | `test/widget/profile_screen_test.dart` | `AuthRepository` replaced by a fake (signed out, signed in, failure) |
+| Auth state model | `test/unit/auth_state_test.dart`, `auth_input_validation_test.dart` | six states; every input rule; client↔rules parity |
+| Registration/sign-in | `test/unit/auth_service_test.dart` | three outcomes, partial failure, idempotent retry |
+| Auth state machine | `test/unit/auth_controller_test.dart` | transitions, restoration, revocation, outage, sign-out, log hygiene |
+| Route guard | `test/unit/auth_redirect_test.dart` | every (state × location) cell |
+| Authentication screens | `test/widget/sign_in_screen_test.dart`, `create_account_screen_test.dart` | validation, in-flight, classified failures, unavailable accounts |
+| Profile screen | `test/widget/profile_screen_test.dart` | loading, failure, missing profile, create/edit, sign-out |
+| Auth routing lifecycle | `test/widget/auth_routing_test.dart` | protection, first frame, full lifecycle, restart |
+| DI seams | `test/widget/profile_screen_test.dart` | `ProfileRepository` replaced by a fake |
 | Startup | `test/unit/app_startup_test.dart` | Bootstrap resolves config, never throws without Firebase |
 | Firebase config/errors | `test/unit/firebase_config_test.dart`, `firebase_error_mapper_test.dart` | Options assembly, partial config fails closed, SDK error classification |
 | Architecture | `test/architecture/domain_purity_test.dart` | Domain purity, `core` ↛ features, Firebase confined to `core/firebase/` + `data/` |
@@ -476,9 +522,21 @@ None of these changed a model's meaning or behaviour; all Phase 1 tests still pa
 
 Phase 3 changed no existing architecture. It added `lib/core/firebase/` and
 `lib/firebase/` configuration, plus one new architecture rule (Firebase may appear
-only in `core/firebase/` and feature `data/` layers) recorded in ADR-007. The
-Phase 2 placeholder `DeviceStateSource`/`AuthRepository` implementations are
-untouched and remain the defaults until Phases 4–6 replace them.
+only in `core/firebase/` and feature `data/` layers) recorded in ADR-007.
+
+Phase 4 replaced the Phase 1/2 auth placeholders and made three changes, all
+recorded in ADR-008:
+
+| Change | Reason |
+| --- | --- |
+| `AuthRepository` is identity-only; profile access moved to a new `ProfileRepository` | The old contract returned an `AppUser` whenever an identity existed, which forced fabricating a profile (FR-048) |
+| `AppUser` dropped `homeLocation`/`notificationPreference`, which became `UserPreferences` | Phase 3's rules keep those fields owner-only in a separate subdocument, so the model now matches the stored schema |
+| `UnauthenticatedAuthRepository` → `UnavailableAuthRepository` (plus its profile twin) | "No account service in this build" is a different fact from "nobody is signed in" |
+
+`createAppRouter` also gained a `refreshListenable`, and `KamApp` now reads
+`appRouterProvider` instead of building a router itself. Overall, Phase 4 added
+behavior rather than restructuring: no Phase 1–3 domain model changed meaning, and
+all earlier tests still pass.
 
 ---
 
@@ -491,18 +549,49 @@ untouched and remain the defaults until Phases 4–6 replace them.
   sign-in/pairing routes already reserved in `AppRoutes`.
 - **New platform**: `DevicePlatform.unknown` plus explicit capability states mean
   a new platform degrades to "unsupported" instead of misreporting.
-- **Server-side rule evaluation**: rule definitions are data, so moving the
-  evaluator changes where it runs, not what a rule is.
+- **Rule evaluation is local by design**: rule definitions are data, and
+  `RuleEvaluator` is a pure function of (rule, device state, clock), so the
+  evaluator can be extended or moved without changing what a rule *is*. Under
+  Spark there is no server-side alternative to move it to.
 
 ---
 
 ## 19. Explicit non-goals so far
 
-No authentication, pairing, device monitoring, location tracking, rule evaluation,
-notifications or event history has been implemented. There is no Cloud Functions
-project and no FCM registration.
+No pairing, device monitoring, location tracking, notification delivery or event
+history has been implemented, and no FCM registration exists. There is no Cloud
+Functions project — and, since the Spark migration, there never will be one
+([ADR-009](../decisions/ADR-009-spark-only-no-cloud-functions.md)).
 
 What exists is the structure those features plug into: bootstrap, DI seams, routing
 shell, result/error handling, platform abstraction, shared UI, logging, the tests
-that hold the boundaries, and (Phase 3) a secure Firestore foundation with
-enforced pair-scoped authorization.
+that hold the boundaries, a secure Firestore foundation with enforced pair-scoped
+authorization (Phase 3), and user identity with an ownership-enforced profile
+(Phase 4).
+
+---
+
+## 20. Authentication and profile (Phase 4)
+
+Full detail: `AUTHENTICATION_ARCHITECTURE.md` and `USER_PROFILE_MODEL.md`.
+
+- **Identity ≠ profile.** `AuthIdentity` comes from Firebase Authentication and
+  always exists while signed in; `AppUser` is the `users/{uid}` document and may be
+  missing. A missing profile is a first-class state (`Success(null)` → *empty*
+  presentation), never a synthesised user (FR-048, NFR-006). ADR-008.
+- **`AuthState`** is sealed with six cases (initializing, unauthenticated,
+  authenticating, authenticated, signing out, error). The controller mirrors the
+  provider's identity stream, so session restoration needs no separate startup
+  code; operations also apply their own outcome so the UI never waits on stream
+  timing.
+- **A guarded router.** `AuthRedirect.resolve` is a pure function; the guard denies
+  by default (only sign-in and create-account are reachable without a session) and
+  never shows data routes while the session is unknown.
+- **Registration** reports three outcomes (`RegistrationComplete`,
+  `RegistrationRejected`, `RegistrationProfilePending`). A failed profile write is
+  never reported as success and never duplicates a profile, because
+  `createProfile` is idempotent.
+- **Firebase stays out of the UI.** Feature `data/` layers hold the SDK; the DI
+  composition reads raw handles from `core/firebase/firebase_providers.dart` so
+  even the provider wiring imports no Firebase package. The architecture test
+  enforces it.

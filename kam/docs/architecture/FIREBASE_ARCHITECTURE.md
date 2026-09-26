@@ -19,10 +19,10 @@ Related: `FIRESTORE_DATA_MODEL.md`, `FIREBASE_SECURITY.md`,
 
 | Service | Responsibility | Phase 3 status |
 | --- | --- | --- |
-| **Firebase Authentication** | Identity: sign-in, sign-out, session, `uid` | SDK added and initialized; **flows intentionally not implemented** (that is the auth phase) |
-| **Cloud Firestore** | Persistent, synchronized application data: profiles, pairs, consent, sharing, device state, location, rules, interpretations, events, notifications | SDK added; collection model, ownership and rules **designed, implemented and tested**; repositories arrive with their features |
-| **Firebase Cloud Messaging** | Push delivery for rule events | SDK added; token lifecycle and sending boundary **documented**; no notification feature yet |
-| **Cloud Functions** | Trusted server-side operations the client must not perform | **Deferred** — justified in §7 |
+| **Firebase Authentication** | Identity: sign-in, sign-out, session, `uid` | Email/password flows and session restoration implemented; no live project configured |
+| **Cloud Firestore** | Persistent, synchronized application data: profiles, pairs, consent, sharing, device state, location, rules, interpretations, events, notifications | SDK added; collection model, ownership and rules **designed, implemented and tested**; live repositories are added with their feature phases |
+| **Firebase Cloud Messaging** | Potential remote push delivery | Not used. The unused SDK dependency was removed; token registration and remote sending are deferred |
+| **Cloud Functions** | Trusted server-side operations the client must not perform | **Excluded** — Spark-only decision in §7; no source, emulator or deploy target |
 | **Cloud Storage** | (Not used.) No binary/media requirement exists in the SRS | Not added |
 | **Remote Config / Analytics / Crashlytics** | Not required by the SRS | Not added |
 
@@ -92,11 +92,8 @@ Guardrails:
   project configured".
 - `FirebaseEmulators.connect` is the **only** place emulator endpoints are set, so
   a release build cannot accidentally point at a laptop (SRS constraint 6).
-- **Cloud Messaging is not emulatable.** The Emulator Suite has no FCM emulator,
-  so `firebase_messaging` is deliberately **not** wired to the emulators and push
-  delivery cannot be tested locally. FCM must be verified on a real device against
-  a real project (Phase 4). `FirebaseEmulatorPorts` therefore declares no
-  `messaging` port.
+- **Cloud Messaging is not emulatable.** The Emulator Suite has no FCM emulator.
+  No messaging client SDK or push delivery is currently wired into the app.
 - The project ids for development and production are **not invented here**; they
   are placeholders in this table only and must be supplied by an operator with
   access to the Firebase console (§5).
@@ -181,49 +178,66 @@ explicit `Unknown`/`Unsupported` state rather than a fabricated value.
 
 ---
 
-## 6. FCM boundary (SRS Task 20)
+## 6. FCM boundary (reserved; not implemented)
 
-Foundation only — the notification feature is not implemented.
+The notification feature is not implemented, and `firebase_messaging` is not a
+project dependency. These fields/rules reserve a safe owner-only location if a
+later notification phase adds token registration.
 
 | Concern | Decision |
 | --- | --- |
 | Token storage | `users/{userId}/fcmTokens/{tokenId}`, **owner-only**, never readable by a partner |
 | Why owner-only | a token is a capability to push to someone's device; a partner must never obtain it |
-| Token lifecycle | the SDK `onTokenRefresh` stream is the source; Phase 10 writes the new token document and deletes the old one |
+| Token lifecycle | Deferred. No SDK or token writer currently exists |
 | Device association | each token document records `platform`, `deviceId`, `createdAt`, `lastSeenAt`; the id is a hash of the token so the raw token is not used as a path segment |
-| Revocation | delete the token document on sign-out and on token refresh; server-side sends must then fail |
-| Authorization | `FIREBASE_MESSAGING` is added, but **no notification permission prompt** is implemented yet |
-| Server-side sending | Cloud Functions with the Admin SDK, using a service account. **The FCM server key/credential is never in the client.** |
+| Revocation | Define token deletion together with any future registration flow |
+| Authorization | No FCM package, token registration or notification permission prompt is currently implemented |
+| Server-side sending | **None exists.** Sending needs a trusted sender with an FCM credential, and the Spark-only architecture has no server — so remote push is **deferred** rather than given a credential. Local platform notification delivery is also not implemented yet. **The FCM server key/credential is never in the client.** |
 | Data boundary | FCM carries *notification* payloads only; it is never the source of truth for application state (SRS: do not treat FCM as state) |
 
 ---
 
-## 7. Cloud Functions boundary — deferred, with justification
+## 7. Cloud Functions boundary — none, permanently
 
-Cloud Functions are needed for exactly one class of work: operations that must be
-trusted. Concretely, later phases will need:
+**There is no Cloud Functions project, and there will not be one.** The project
+must run on the Firebase **Spark** plan without a Cloud Billing account, and Cloud
+Functions are only deployable on Blaze — the billing account is the blocker, not
+the cost. The same applies to Cloud Run, Cloud Scheduler, Pub/Sub and any
+Extension that bundles Functions.
 
-| Future function | Why it must be server-side |
+This section replaces an earlier position that deferred four capabilities to a
+future Functions project. That plan is superseded by
+[ADR-009](../decisions/ADR-009-spark-only-no-cloud-functions.md); the full
+operation-by-operation audit and its replacements are in
+[SPARK_ONLY_ARCHITECTURE.md](SPARK_ONLY_ARCHITECTURE.md) §2.
+
+In summary, each former server responsibility is now enforced by Security Rules
+verifying facts the client cannot forge:
+
+| Formerly a server operation | Now |
 | --- | --- |
-| Issue/validate pairing codes | Codes must be unguessable, expiring and single-use; a client cannot be trusted to enforce that (FR-003, FR-004) |
-| Activate a pair (`pending → active`) | Requires verifying *both* consent documents in a transaction (FR-005, NFR-003, NFR-042) |
-| Dispatch notifications | Sending requires privileged credentials (FR-041, FR-044) |
-| Scheduled retention/deletion | Needs to act across users (NFR-031, NFR-032) |
+| Activate a pair | `bothConsentsGranted()` — the rules read **both** consent documents; each can only be written by its own subject |
+| Issue/validate a pairing code | Client CSPRNG + rules enforcing ≥20 chars, ≤1 h expiry, single-use redemption, and **`list` denied** |
+| Dispatch a notification | **Local** notification from the user's own device; the owner writes their own per-user record. Remote push is deferred |
+| Evaluate rules | **Client** (`RuleEvaluator`) — pure and deterministic; inputs are facts the user may already read |
+| Scheduled retention/deletion | **Deferred** — needs a cross-user scheduler, so it is documented rather than delegated |
 
-**Phase 3 deliberately does not scaffold a Functions project.** Reasons:
+The vital property is unchanged: **the client is never the authority.** A client
+may *request* activation; it cannot assert the other member's consent, write into
+anyone else's collection, or redeem a code twice.
 
-1. No Phase 3 acceptance criterion is satisfied by an empty Functions package.
-2. The rules already **fail closed** without it: because no rule permits a client
-   to set `status: 'active'`, a pair simply cannot be activated until the
-   activation function exists. Adding a placeholder function would create a
-   deploy target and a second toolchain (`functions/`) with no behaviour to test.
-3. The Phase 3 brief says not to move logic to Functions merely because it could
-   go there.
+Two consequences worth stating plainly:
 
-What *is* in place: emulator ports for Functions are already declared in
-`firebase.json` (`5001`), and `FirebaseEmulators` documents where the Functions
-emulator connection belongs. The function that must exist first is the pair
-activation function, and it belongs with the pairing workflow.
+1. **Remote push to a partner's device does not exist.** No sending path, no
+   server credential. Local alert delivery is also not implemented; the
+   notification boundary reports unsupported. The UI must show last-known state
+   with its age when updates are unavailable.
+2. **Cross-user retention/cleanup is unenforced.** Ownership-scoped lazy cleanup
+   only. Granting a client cross-user delete is exactly the compromise this
+   architecture exists to prevent.
+
+No Functions emulator is configured: this Spark-only project has no Functions
+source, emulator port, or deploy target.
 
 ---
 
@@ -285,10 +299,12 @@ Documented in `FIRESTORE_DATA_MODEL.md` §10. The design rules that matter most:
 1. **No real Firebase project is configured**, so no deployment was performed and
    the app currently starts offline (`PHASE_03_COMPLETION_REPORT.md` §5).
 2. **Authentication flows are not implemented** (intentionally).
-3. **Pair activation has no backend yet**, so a client-only flow cannot reach
-   `status == 'active'` — by design, fail-closed (§7).
-4. **No Cloud Functions project** (§7).
-5. **No FCM sending path**, and no notification permission prompt.
+3. **Pair activation needs both consent documents, not a backend.** The rules
+   gate the transition, so the flow is still fail-closed without mutual consent
+   (§7).
+4. **No Cloud Functions project, and none is planned** (§7).
+5. **No FCM sending path**, no notification permission prompt, and no remote push
+   of any kind.
 6. **iOS is unvalidated** on this Windows host; FlutterFire's iOS setup
    (CocoaPods, `minimumOsVersion`) must be verified on macOS. `firebase_core` and
    friends require iOS 13+, which the current template satisfies, but this is an

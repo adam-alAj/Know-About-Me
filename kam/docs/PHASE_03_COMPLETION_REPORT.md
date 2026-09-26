@@ -1,5 +1,16 @@
 # Phase 3 Completion Report — Firebase Project Setup & Backend Foundation
 
+> **Historical record — partly superseded.** This report accurately describes Phase
+> 3 as it stood. It is retained deliberately, because its Cloud Functions
+> assumptions are the clearest explanation of *why* the Spark-only migration was
+> needed. Every statement below that depends on a Cloud Functions project is now
+> obsolete: see
+> [ADR-009](decisions/ADR-009-spark-only-no-cloud-functions.md) and
+> [SPARK_ONLY_ARCHITECTURE.md](architecture/SPARK_ONLY_ARCHITECTURE.md). In
+> particular, claims 2 and the last two risk rows of §6 were **wrong about rules**:
+> a rules evaluation can read sibling documents atomically with the write, so both
+> consent documents *can* be verified without a Function.
+
 - **Phase:** 3 of the phase plan in
   [`requirements/REQUIREMENT_MAPPING.md`](requirements/REQUIREMENT_MAPPING.md)
 - **Date:** 2026-09-26
@@ -180,7 +191,7 @@ about the shipped rules rather than a separate test copy.
 | Rule evaluation engine | 8+ |
 | Notification dispatch | 8+ |
 | Event-history UI | 9+ |
-| Cloud Functions project (rule evaluation, notification triggers, cleanup) | 5+ |
+| ~~Cloud Functions project (rule evaluation, notification triggers, cleanup)~~ — **ruled out**; superseded by ADR-009 | — |
 
 No rule, provider or widget for any of the above was created "for shape".
 
@@ -192,9 +203,11 @@ No rule, provider or widget for any of the above was created "for shape".
    sender id exists in this environment, and inventing them was forbidden. The
    foundation is complete and secure; the remaining step is purely operational
    (`FIREBASE_ARCHITECTURE.md` §5).
-2. **No Cloud Functions project**, so `pairs.status` cannot reach `active`. Pairing
-   is not end-to-end demonstrable, and the rules deliberately *deny* client
-   activation rather than permitting an insecure shortcut. Phase 5's first task.
+2. **~~No Cloud Functions project, so `pairs.status` cannot reach `active`.~~** —
+   **superseded.** Under the Spark-only architecture there is no Functions project
+   and none is planned; the rules instead gate activation on both consent
+   documents. `pairs.status` *can* now reach `active`, without a server and
+   without permitting an insecure shortcut.
 3. **iOS build not validated** — Windows host, no Xcode.
 4. **No production deployment was performed or claimed.** Rules deploy, index
    deploy and project creation are documented, not executed.
@@ -218,11 +231,11 @@ No rule, provider or widget for any of the above was created "for shape".
 | --- | --- | --- |
 | Sharing gates read a second document (`get()`), adding billed reads | Cost at scale | Accepted and bounded: ≤2 document lookups per partner read; recorded in the cost model |
 | A client could write unauthorized data if rules drift | Privacy breach | 31 rules tests; rules changes must keep them green; rules are the only authorization path |
-| Pair activation depends on a Function that does not exist yet | Phase 5 dependency | Fail-closed today; the rule and the Function requirement are documented together |
+| ~~Pair activation depends on a Function that does not exist yet~~ | Phase 5 dependency | **Resolved** by ADR-009: activation is gated by the rules on both consent documents |
 | `demo-kam` could be mistaken for a deployable project | Accidental deploy attempt | `.firebaserc` uses the reserved `demo-` prefix; deploy steps require an explicit `firebase use --add` |
 | Emulator ports may collide on a busy machine | Local dev friction | Ports documented in one place (`firebase.json` + `FirebaseEmulatorPorts`); ports must change together |
 | Location retention is defined in policy but not yet enforced | Long-term privacy | Retention documented per collection in `FIRESTORE_DATA_MODEL.md` §10; a scheduled cleanup Function is scheduled with Phase 5+ |
-| Consent completion is not enforced by rules (rules cannot verify both consent docs without a racing cross-document read) | A pair could activate without two consents if the Function is careless | Phase 5 activation Function must validate both consents in a transaction; documented in `FIREBASE_SECURITY.md` §9.2 |
+| ~~Consent completion is not enforced by rules (rules cannot verify both consent docs without a racing cross-document read)~~ | — | **Assumption corrected.** This premise was wrong: a rules `get()` is evaluated atomically with the write, with no race. `bothConsentsGranted()` now enforces exactly this, covered by four emulator scenarios (ADR-009) |
 | Firestore offline cache can look current | Misleading UI | `FreshnessIndicator` + `DataPresentation` already refuse to present stale data as current (`ARCHITECTURE.md` §12); Phase 6 wires real timestamps |
 
 ---

@@ -90,7 +90,6 @@ void main() {
       'package:firebase_core',
       'package:firebase_auth',
       'package:cloud_firestore',
-      'package:firebase_messaging',
       'package:cloud_functions',
     ];
 

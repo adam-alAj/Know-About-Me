@@ -21,7 +21,7 @@ Authoritative documentation:
 | `firestore.rules` | Security rules (default-deny, pair-scoped) |
 | `firestore.indexes.json` | Composite indexes for the queries the product needs |
 | `package.json` | Node project for the rules tests |
-| `test/firestore.rules.test.js` | 31 emulator tests covering the required scenarios |
+| `test/firestore.rules.test.js` | Firestore emulator tests for authorization, pairing, sharing, and profile/preferences rules |
 
 ---
 
@@ -87,15 +87,16 @@ Emulator UI: <http://localhost:4000>
 
 ### Ports
 
-`8080` Firestore · `9099` Auth · `5001` Functions · `4000` UI.
+`8080` Firestore · `9099` Auth · `4000` UI. No Functions emulator is configured:
+the project uses the **Spark** plan and has no Cloud Functions source. See
+[`../docs/architecture/SPARK_ONLY_ARCHITECTURE.md`](../docs/architecture/SPARK_ONLY_ARCHITECTURE.md).)
 
 If a port is busy, change `firebase.json` **and** `FirebaseEmulatorPorts` in
 `../lib/core/firebase/firebase_emulators.dart` together.
 
 > **Cloud Messaging is not emulatable.** The Firebase Emulator Suite has no FCM
-> emulator, so push delivery cannot be exercised locally and `firebase_messaging`
-> is not wired to the emulators. FCM behaviour must be verified on a real device
-> against a real project in Phase 4.
+> emulator, and no messaging SDK or push delivery is currently wired into the
+> app. A future notification implementation would need device-level verification.
 
 ---
 

@@ -33,11 +33,12 @@ void main() {
   testWidgets('pushes the profile route above the shell', (tester) async {
     await pumpTestApp(tester);
 
-    await tester.tap(find.byIcon(Icons.person_outline));
-    await tester.pumpAndSettle();
+    await openProfile(tester);
 
     expect(find.text('Profile'), findsOneWidget);
-    expect(find.text('Not signed in'), findsOneWidget);
+    // A signed-in user's own account details, from the authentication state.
+    expect(find.text('afraa@example.com'), findsOneWidget);
+    expect(find.text('Not signed in'), findsNothing);
   });
 
   testWidgets('renders a not-found screen for an unknown route', (

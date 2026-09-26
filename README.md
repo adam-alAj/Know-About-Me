@@ -23,13 +23,18 @@ stale or unavailable information as current.
 - Phase 1 completion report: [`kam/docs/PHASE_01_COMPLETION_REPORT.md`](kam/docs/PHASE_01_COMPLETION_REPORT.md)
 - Phase 2 completion report: [`kam/docs/PHASE_02_COMPLETION_REPORT.md`](kam/docs/PHASE_02_COMPLETION_REPORT.md)
 - Phase 3 completion report: [`kam/docs/PHASE_03_COMPLETION_REPORT.md`](kam/docs/PHASE_03_COMPLETION_REPORT.md)
+- Phase 4 completion report: [`kam/docs/PHASE_04_COMPLETION_REPORT.md`](kam/docs/PHASE_04_COMPLETION_REPORT.md)
 - Architecture: [`kam/docs/architecture/ARCHITECTURE.md`](kam/docs/architecture/ARCHITECTURE.md)
+- Authentication: [`kam/docs/architecture/AUTHENTICATION_ARCHITECTURE.md`](kam/docs/architecture/AUTHENTICATION_ARCHITECTURE.md)
+- User profile model: [`kam/docs/architecture/USER_PROFILE_MODEL.md`](kam/docs/architecture/USER_PROFILE_MODEL.md)
 - Firebase foundation: [`kam/docs/architecture/FIREBASE_ARCHITECTURE.md`](kam/docs/architecture/FIREBASE_ARCHITECTURE.md)
 - Firestore data model: [`kam/docs/architecture/FIRESTORE_DATA_MODEL.md`](kam/docs/architecture/FIRESTORE_DATA_MODEL.md)
 - Firebase security model: [`kam/docs/architecture/FIREBASE_SECURITY.md`](kam/docs/architecture/FIREBASE_SECURITY.md)
 - Platform capability matrix: [`kam/docs/platform/PLATFORM_CAPABILITIES.md`](kam/docs/platform/PLATFORM_CAPABILITIES.md)
 - Requirement mapping: [`kam/docs/requirements/REQUIREMENT_MAPPING.md`](kam/docs/requirements/REQUIREMENT_MAPPING.md)
 - Architecture decisions: [`kam/docs/decisions/`](kam/docs/decisions/)
+- Spark-only architecture: [`kam/docs/architecture/SPARK_ONLY_ARCHITECTURE.md`](kam/docs/architecture/SPARK_ONLY_ARCHITECTURE.md)
+- Spark migration report: [`kam/docs/SPARK_MIGRATION_COMPLETION_REPORT.md`](kam/docs/SPARK_MIGRATION_COMPLETION_REPORT.md)
 
 ## Quick start
 
@@ -54,14 +59,20 @@ firebase emulators:exec --only firestore "node --test firebase/test/firestore.ru
 
 ## Status
 
-**Phases 1 (foundation), 2 (application architecture) and 3 (Firebase backend
-foundation) are complete.** The project builds for Android, analyzes cleanly, its
-Flutter tests pass, and the Firestore Security Rules are proven by 31 emulator
-tests. Authentication, pairing, device monitoring, location, the rule engine and
-notifications are scheduled in later phases — see the phase plan in the
-requirement mapping.
+**Phases 1–4 are complete**: foundation, application architecture, the Firebase
+backend foundation, and authentication + user profile — followed by a **Spark-only
+correction** that removed the mandatory Cloud Functions dependency. The
+architecture is designed for Spark; no live Firebase project is configured.
+The project builds for Android, analyzes cleanly, 269 Flutter tests pass, and the
+Firestore Security Rules are proven by 70 emulator tests. Pairing, device
+monitoring, location, the rule management UI, notification delivery and history
+are scheduled in later phases — see the phase plan in the requirement mapping.
 
-Two things are deliberately incomplete and documented rather than faked: no real
-Firebase project is connected (Phase 4 supplies credentials), and no Cloud
-Functions project exists yet (Phase 5 needs it to activate a pair). No privileged
+Three things are deliberately incomplete and documented rather than faked: no real
+Firebase project is connected (so the app reports accounts as unavailable instead
+of offering a form that cannot work), **notification delivery is not
+implemented** (the local notification boundary reports unsupported until its
+platform plugin is added; remote push needs a trusted sender), and the auth flow has not been
+exercised end-to-end against the Auth emulator because this environment has no
+Android emulator and FlutterFire does not support Windows desktop. No privileged
 credential and no project-specific config file is committed.

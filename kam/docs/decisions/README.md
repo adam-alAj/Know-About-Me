@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Decisions made during Phases 1–3. Each ADR records the context, the decision, its
+Decisions made during Phases 1–4. Each ADR records the context, the decision, its
 consequences and the alternatives that were rejected.
 
 | ADR | Title | Phase | Status |
@@ -12,6 +12,15 @@ consequences and the alternatives that were rejected.
 | [ADR-005](ADR-005-dependency-injection-and-error-handling.md) | Dependency injection via Riverpod, and the `Result` / `AppFailure` split | 2 | Accepted |
 | [ADR-006](ADR-006-state-scoping-and-async-presentation.md) | State scoping and the async data-presentation contract | 2 | Accepted |
 | [ADR-007](ADR-007-firebase-integration.md) | Firebase integration approach, configuration and boundaries | 3 | Accepted |
+| [ADR-008](ADR-008-identity-profile-separation.md) | Identity vs profile separation, and the partial-registration strategy | 4 | Accepted |
+| [ADR-009](ADR-009-spark-only-no-cloud-functions.md) | Spark-only architecture: no Cloud Functions, no billing account | 5 | Accepted — supersedes the Cloud Functions rows of ADR-002 |
+| [Requested Spark migration filename](ADR-004-remove-cloud-functions-spark-only.md) | Companion copy of ADR-009 (canonical decision) | 5 | Accepted |
 
 Convention: file name `ADR-NNN-kebab-case-title.md`; status is one of Proposed,
 Accepted, Deprecated, Superseded.
+
+Numbering note: the Spark-only migration brief asked for this decision to be
+recorded as `ADR-004`. That identifier was already held by
+[ADR-004](ADR-004-configuration-strategy.md), and reusing it would have made the
+index and every existing cross-reference ambiguous, so the next free number was
+used. Existing ADRs were not renumbered.
