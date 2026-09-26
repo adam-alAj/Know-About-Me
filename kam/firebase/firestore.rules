@@ -25,12 +25,12 @@ rules_version = '2';
 //          trusted to assert the other's agreement);
 //        * consents are the authority for sharing, so revoking consent stops
 //          partner reads immediately, not just on the next write;
-//        * pairing codes are client-created but must be long, random and
-//          short-lived, and are single-use and unlistable;
+//        * pairing codes are client-generated with a CSPRNG, expire quickly,
+//          are single-use, unlistable, and required to create a pair;
 //        * notifications are per-user records written by the owner's own
 //          device, never injected by anyone else.
-//      Nothing that was server-only has been delegated to the client's
-//      judgement: authority moved into rules that the client cannot forge.
+//      Rules authorize each write. Client-generated randomness and global
+//      duplicate-pair prevention remain limited; see docs/pairing/.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -83,7 +83,9 @@ service cloud.firestore {
     }
 
     function isActivePair(pairId) {
-      return isMember(pairId) && pairData(pairId).status == 'active';
+      return isMember(pairId)
+        && pairData(pairId).status == 'active'
+        && bothConsentsGranted(pairId, pairData(pairId).memberIds);
     }
 
     // Per-pair sharing decision of one member. One document per (pair, user) so
@@ -183,6 +185,16 @@ service cloud.firestore {
              'displayName', 'photoUrl', 'timeZone', 'createdAt', 'updatedAt'
            ])
         && request.resource.data.createdAt == resource.data.createdAt
+        && (
+             ('activatedAt' in resource.data.keys()
+               && request.resource.data.activatedAt == resource.data.activatedAt)
+             || (!('activatedAt' in resource.data.keys())
+               && (
+                    !('activatedAt' in request.resource.data.keys())
+                    || (request.resource.data.status == 'active'
+                      && request.resource.data.activatedAt == request.time)
+                  ))
+           )
         && request.resource.data.updatedAt == request.time
         && request.resource.data.displayName is string
         && request.resource.data.displayName.size() > 0
@@ -292,12 +304,8 @@ service cloud.firestore {
     // pairingCodes/{code} — client-issued connection codes (FR-003, FR-004).
     //
     // ADR-002 originally reserved code issuance for a Cloud Function because a
-    // code must be unguessable, expiring and single-use. Spark rules can enforce
-    // all three, so the function is not needed:
-    //   * unguessable — the code must be at least 20 characters, and the client
-    //     generates it with a CSPRNG (`Random.secure`). Rules constrain the
-    //     shape, not the randomness, so this is enforced by the format check
-    //     plus the inability to LIST codes (an attacker cannot enumerate them).
+    // Rules enforce length, expiry and single-use. Randomness comes from the
+    // shipped client's CSPRNG; rules cannot prove entropy or rate-limit guesses.
     //   * expiring  — the code must carry a future expiry no more than 1h away,
     //     and every `get`/`update` re-checks it.
     //   * single-use — redemption may only set `usedByUserId` once, from null.
@@ -309,7 +317,9 @@ service cloud.firestore {
       // Redeemable lookup: a signed-in user may fetch a specific code document
       // while it is live. `list` is denied, so outstanding codes cannot be
       // harvested — guessing a 20+ character code is infeasible.
-      allow get: if signedIn() && resource.data.expiresAt > request.time;
+      allow get: if signedIn() && resource.data.expiresAt > request.time
+        && resource.data.revoked == false && resource.data.status == 'created'
+        && resource.data.usedByUserId == null;
       allow list: if false;
 
       allow create: if signedIn()
@@ -319,6 +329,7 @@ service cloud.firestore {
         && request.resource.data.code.size() >= 20
         && request.resource.data.code.size() <= 64
         && request.resource.data.revoked == false
+        && request.resource.data.status == 'created'
         && request.resource.data.usedByUserId == null
         && request.resource.data.createdAt == request.time
         && request.resource.data.expiresAt is timestamp
@@ -327,18 +338,28 @@ service cloud.firestore {
 
       // Single use: only a live, unused, unrevoked code can be consumed, the
       // consumer must be the caller, and consumption may change nothing else.
-      allow update: if signedIn()
-        && resource.data.usedByUserId == null
-        && resource.data.revoked == false
-        && resource.data.expiresAt > request.time
-        && request.resource.data.usedByUserId == uid()
-        && request.resource.data.usedAt == request.time
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-             'usedByUserId', 'usedAt'
-           ]);
+      allow update: if signedIn() && resource.data.expiresAt > request.time
+        && (
+          (resource.data.usedByUserId == null
+            && resource.data.revoked == false
+            && resource.data.status == 'created'
+            && request.resource.data.usedByUserId == uid()
+            && request.resource.data.usedAt == request.time
+            && request.resource.data.status == 'consumed'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedByUserId', 'usedAt', 'status']))
+          ||
+          (resource.data.createdByUserId == uid()
+            && resource.data.usedByUserId == null
+            && resource.data.revoked == false
+            && resource.data.status == 'created'
+            && request.resource.data.revoked == true
+            && request.resource.data.status == 'cancelled'
+            && request.resource.data.revokedAt == request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['revoked', 'revokedAt', 'status']))
+        );
 
       // The issuer may withdraw their own code (a redeemed one stays for audit).
-      allow delete: if signedIn() && resource.data.createdByUserId == uid();
+      allow delete: if false;
     }
 
     // =====================================================================
@@ -351,8 +372,7 @@ service cloud.firestore {
       // filter on memberIds.
       allow read: if signedIn() && uid() in resource.data.memberIds;
 
-      // A connection request is created by a signed-in user who includes
-      // themselves. It is always 'pending': activation is server-side.
+      // A connection request is bound to an atomically consumed invitation.
       allow create: if signedIn()
         && request.resource.data.memberIds is list
         && request.resource.data.memberIds.size() == 2
@@ -360,38 +380,62 @@ service cloud.firestore {
         && request.resource.data.memberIds[0] != request.resource.data.memberIds[1]
         && request.resource.data.status == 'pending'
         && request.resource.data.requestedBy == uid()
+        && request.resource.data.invitationCode is string
+        && existsAfter(/databases/$(database)/documents/pairingCodes/$(request.resource.data.invitationCode))
+        && getAfter(/databases/$(database)/documents/pairingCodes/$(request.resource.data.invitationCode)).data.usedByUserId == uid()
+        && getAfter(/databases/$(database)/documents/pairingCodes/$(request.resource.data.invitationCode)).data.status == 'consumed'
+        && getAfter(/databases/$(database)/documents/pairingCodes/$(request.resource.data.invitationCode)).data.createdByUserId in request.resource.data.memberIds
+        && getAfter(/databases/$(database)/documents/pairingCodes/$(request.resource.data.invitationCode)).data.expiresAt > request.time
+        && getAfter(/databases/$(database)/documents/pairingCodes/$(request.resource.data.invitationCode)).data.revoked == false
         && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.schemaVersion == 1
         && request.resource.data.keys().hasOnly([
-             'memberIds', 'status', 'requestedBy', 'createdAt', 'updatedAt'
+             'memberIds', 'status', 'requestedBy', 'createdAt', 'updatedAt',
+             'invitationCode', 'schemaVersion'
            ]);
 
       // Membership is immutable. A member may never grant themselves access to
       // another person's data; the only forward transition is activation, and it
       // is permitted solely when BOTH consent documents are already granted.
       //
-      // This replaces the server-side activation function: the rules verify the
-      // same invariant a trusted transaction would have, and because neither
-      // user can write the other's consent document, the check cannot be forged.
+      // Both consents are required. Spark cannot provide a global uniqueness
+      // index for arbitrary pair IDs; see docs/pairing/PAIRING_SYSTEM.md.
       allow update: if isMember(pairId)
         && request.resource.data.memberIds == resource.data.memberIds
         && request.resource.data.requestedBy == resource.data.requestedBy
+        && request.resource.data.invitationCode == resource.data.invitationCode
+        && request.resource.data.schemaVersion == resource.data.schemaVersion
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.updatedAt == request.time
+        && request.resource.data.keys().hasOnly([
+             'memberIds', 'status', 'requestedBy', 'createdAt', 'updatedAt',
+             'invitationCode', 'schemaVersion', 'activatedAt', 'endedAt'
+           ])
         && request.resource.data.status is string
         && (
              // No-op status write (for example touching updatedAt).
              request.resource.data.status == resource.data.status
+             && (
+                  ('endedAt' in resource.data.keys()
+                    && request.resource.data.endedAt == resource.data.endedAt)
+                  || (!('endedAt' in resource.data.keys())
+                    && !('endedAt' in request.resource.data.keys()))
+                )
              // Activation, or resuming a paused pair, once both users agreed.
              || (
                   resource.data.status in ['pending', 'paused']
                   && request.resource.data.status == 'active'
                   && resource.data.memberIds.size() == 2
+                  && (!('activatedAt' in resource.data.keys()) || request.resource.data.activatedAt == resource.data.activatedAt)
+                  && request.resource.data.activatedAt == request.time
                   && bothConsentsGranted(pairId, resource.data.memberIds)
                 )
              // Ending the relationship is always available to a member.
              || (
                   resource.data.status in ['pending', 'active', 'paused']
                   && request.resource.data.status in ['disconnected', 'revoked']
+                  && request.resource.data.endedAt == request.time
                 )
            );
 
@@ -421,15 +465,29 @@ service cloud.firestore {
       match /consents/{consentId} {
         allow read: if isMember(pairId);
 
-        allow create, update: if isMember(pairId)
+        allow create: if isMember(pairId)
           && isSelf(consentId)
           && request.resource.data.userId == consentId
           && request.resource.data.pairId == pairId
           && request.resource.data.granted is bool
           && request.resource.data.categories is list
-          && request.resource.data.categories.hasOnly(validCategories());
+          && request.resource.data.categories.hasOnly(validCategories())
+          && request.resource.data.updatedAt == request.time
+          && (request.resource.data.granted == false || request.resource.data.grantedAt == request.time);
 
-        allow delete: if isSelf(consentId);
+        allow update: if isMember(pairId)
+          && isSelf(consentId)
+          && resource.data.granted == true
+          && request.resource.data.userId == resource.data.userId
+          && request.resource.data.pairId == resource.data.pairId
+          && request.resource.data.grantedAt == resource.data.grantedAt
+          && request.resource.data.categories == resource.data.categories
+          && request.resource.data.categories.hasOnly(validCategories())
+          && request.resource.data.granted is bool
+          && request.resource.data.grantedAt == resource.data.grantedAt
+          && request.resource.data.updatedAt == request.time;
+
+        allow delete: if isMember(pairId) && isSelf(consentId);
       }
 
       // --- live sharing switches -------------------------------------------

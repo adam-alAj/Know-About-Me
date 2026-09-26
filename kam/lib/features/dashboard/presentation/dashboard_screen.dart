@@ -82,14 +82,18 @@ class DashboardScreen extends ConsumerWidget {
           ),
           const SizedBox(height: AppSpacing.lg),
           const SectionHeader(title: 'Connected partner'),
+          AppButton.secondary(
+            label: 'Manage pairing and consent',
+            onPressed: () => context.pushNamed(AppRoutes.pairing),
+          ),
+          const SizedBox(height: AppSpacing.sm),
           const AppCard(
             child: SizedBox(
               height: 200,
               child: EmptyView(
                 icon: Icons.link_off,
                 message:
-                    'No connected partner yet.\nPairing arrives in a '
-                    'later phase.',
+                    'No partner device data is available yet.',
               ),
             ),
           ),

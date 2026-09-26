@@ -249,18 +249,17 @@ and 16 emulator tests cover them in
 
 ## 9. Known gaps and follow-ups
 
-1. **Pair activation is not implemented** (needs the Phase 5 backend). Until
-   then, `status` cannot leave `pending` in a client-only flow.
-2. **Completion of consents is not enforced by rules.** Rules require an *active*
-   pair, but they cannot verify that both consent documents exist, because that
-   would need a second cross-document read and would race with the activation
-   transaction. The activation function must validate both consents in a
-   transaction (Phase 5).
+1. **Global duplicate-pair prevention is not enforceable with arbitrary pair IDs
+   and no trusted server.** The app uses transaction retries, but a modified
+   client could choose a second pair ID. See `docs/pairing/PAIRING_SYSTEM.md`.
+2. **Code guessing cannot be server-rate-limited.** Codes have 130 bits of
+   client-generated CSPRNG entropy, short expiry, and single-use rules, but the
+   rules cannot prove entropy or throttle authenticated attempts.
 3. **No Rules-unit-test coverage for the `devices` collection's delete path** or
    for a 3+-member pair (the model is strictly two-member).
 4. **No App Check.** Firebase App Check should be enabled when the app ships, to
    raise the cost of automated abuse; it is not required for the authorization
    model itself.
-5. **Rate limiting / abuse protection** is deferred to the Functions phase.
+5. **Rate limiting / abuse protection** needs trusted infrastructure if required.
 6. **Retention and deletion jobs** (NFR-031, NFR-032) are deferred to Phase 12;
    rules currently allow the owner to delete their own profile, state and location.

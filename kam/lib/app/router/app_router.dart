@@ -10,6 +10,7 @@ import '../../features/auth/presentation/splash_screen.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/history/presentation/history_screen.dart';
 import '../../features/privacy/presentation/privacy_screen.dart';
+import '../../features/pairing/presentation/pairing_screen.dart';
 import '../../features/rules/presentation/rules_screen.dart';
 import 'app_routes.dart';
 import 'app_shell.dart';
@@ -104,8 +105,8 @@ GoRouter createAppRouter({
         name: AppRoutes.profile,
         builder: (context, state) => const ProfileScreen(),
       ),
-      // The pairing routes are reserved for the connection phase; the guard
-      // already protects this area, so adding them needs no routing rework.
+      GoRoute(path: AppRoutes.pairingPath, name: AppRoutes.pairing,
+        builder: (context, state) => const PairingScreen()),
     ],
     errorBuilder: (context, state) =>
         UnknownRouteScreen(uri: state.uri.toString()),

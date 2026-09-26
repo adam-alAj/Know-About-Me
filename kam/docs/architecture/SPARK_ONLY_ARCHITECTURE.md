@@ -10,6 +10,12 @@ the Spark (no-cost) plan with no Cloud Billing account**. The decision record is
 [ADR-009](../decisions/ADR-009-spark-only-no-cloud-functions.md); the checklist
 is [SPARK_COMPATIBILITY_CHECKLIST.md](../SPARK_COMPATIBILITY_CHECKLIST.md).
 
+**Phase 5 correction:** rules now bind pair creation to invitation redemption
+and require two consent documents for activation. Client CSPRNG quality is not
+provable by rules, and Spark rules cannot globally prevent a modified client
+from creating a duplicate pair under another pair ID. See
+[PAIRING_SYSTEM.md](../pairing/PAIRING_SYSTEM.md) for the concrete limits.
+
 ---
 
 ## 1. Why there is no server

@@ -39,6 +39,7 @@ const {
   where,
   serverTimestamp,
   Timestamp,
+  runTransaction,
 } = require('firebase/firestore');
 
 const PROJECT_ID = 'demo-kam';
@@ -55,6 +56,8 @@ async function seedPair(db, pairId, { memberIds, status }) {
     memberIds,
     status,
     requestedBy: memberIds[0],
+    invitationCode: 'seeded-invitation',
+    schemaVersion: 1,
     createdAt: ts(),
     updatedAt: ts(),
   });
@@ -214,6 +217,14 @@ test('unauthenticated clients cannot create a pair', async () => {
       updatedAt: serverTimestamp(),
     }),
   );
+});
+
+test('an authenticated user cannot forge a pair without atomically redeeming an invitation', async () => {
+  await assertFails(setDoc(doc(as('uE'), 'pairs', 'forged'), {
+    memberIds: ['uA', 'uE'], status: 'pending', requestedBy: 'uE',
+    createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    invitationCode: CODE, schemaVersion: 1,
+  }));
 });
 
 // -------------------------------------------------------- user isolation ----
@@ -543,6 +554,7 @@ test('a member who disconnects loses access to the partner\'s data', async () =>
   await assertSucceeds(
     updateDoc(doc(db, 'pairs', 'p1'), {
       status: 'disconnected',
+      endedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     }),
   );
@@ -617,6 +629,7 @@ test('an active pair cannot be created by one-sided consent', async () => {
   await assertFails(
     updateDoc(doc(as('uA'), 'pairs', 'p3'), {
       status: 'active',
+      activatedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     }),
   );
@@ -647,6 +660,7 @@ test('a pair becomes active once BOTH members have granted consent', async () =>
   await assertSucceeds(
     updateDoc(doc(as('uA'), 'pairs', 'p3'), {
       status: 'active',
+      activatedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     }),
   );
@@ -665,7 +679,7 @@ test('activation cannot be attempted without a server timestamp', async () => {
   });
 
   await assertFails(
-    updateDoc(doc(as('uA'), 'pairs', 'p3'), { status: 'active', updatedAt: ts() }),
+    updateDoc(doc(as('uA'), 'pairs', 'p3'), { status: 'active', activatedAt: ts(), updatedAt: ts() }),
   );
 });
 
@@ -691,6 +705,7 @@ async function publishCode(db, userId, code, overrides = {}) {
     code,
     createdByUserId: userId,
     revoked: false,
+    status: 'created',
     usedByUserId: null,
     createdAt: serverTimestamp(),
     expiresAt: inThirtyMinutes(),
@@ -735,6 +750,24 @@ test('pairing codes cannot be listed, so outstanding codes cannot be harvested',
   await assertFails(getDocs(collection(as('uB'), 'pairingCodes')));
 });
 
+test('redemption and pending pair creation are one authorized transaction', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await publishCode(context.firestore(), 'uA', CODE);
+  });
+  const db = as('uE');
+  await assertSucceeds(runTransaction(db, async (tx) => {
+    const codeRef = doc(db, 'pairingCodes', CODE);
+    const pairRef = doc(db, 'pairs', 'pending-uA-uE');
+    await tx.get(codeRef);
+    tx.update(codeRef, { usedByUserId: 'uE', usedAt: serverTimestamp(), status: 'consumed' });
+    tx.set(pairRef, {
+      memberIds: ['uA', 'uE'], status: 'pending', requestedBy: 'uE',
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      invitationCode: CODE, schemaVersion: 1,
+    });
+  }));
+});
+
 test('a pairing code can be redeemed exactly once', async () => {
   await testEnv.withSecurityRulesDisabled(async (context) => {
     await publishCode(context.firestore(), 'uA', CODE);
@@ -744,6 +777,7 @@ test('a pairing code can be redeemed exactly once', async () => {
     updateDoc(doc(as('uE'), 'pairingCodes', CODE), {
       usedByUserId: 'uE',
       usedAt: serverTimestamp(),
+      status: 'consumed',
     }),
   );
 
@@ -752,6 +786,7 @@ test('a pairing code can be redeemed exactly once', async () => {
     updateDoc(doc(as('uF'), 'pairingCodes', CODE), {
       usedByUserId: 'uF',
       usedAt: serverTimestamp(),
+      status: 'consumed',
     }),
   );
 });
@@ -765,6 +800,7 @@ test('redeeming a code cannot smuggle other changes', async () => {
     updateDoc(doc(as('uE'), 'pairingCodes', CODE), {
       usedByUserId: 'uE',
       usedAt: serverTimestamp(),
+      status: 'consumed',
       expiresAt: Timestamp.fromMillis(Date.now() + 60 * 60 * 1000),
     }),
   );
@@ -779,6 +815,7 @@ test('an expired pairing code cannot be redeemed', async () => {
       code: expired,
       createdByUserId: 'uA',
       revoked: false,
+      status: 'created',
       usedByUserId: null,
       createdAt: ts(),
       expiresAt: Timestamp.fromMillis(Date.now() - 1000),
@@ -790,17 +827,22 @@ test('an expired pairing code cannot be redeemed', async () => {
     updateDoc(doc(as('uE'), 'pairingCodes', expired), {
       usedByUserId: 'uE',
       usedAt: serverTimestamp(),
+      status: 'consumed',
     }),
   );
 });
 
-test('only the issuer can revoke their pairing code', async () => {
+test('only the issuer can cancel their pairing code', async () => {
   await testEnv.withSecurityRulesDisabled(async (context) => {
     await publishCode(context.firestore(), 'uA', CODE);
   });
 
-  await assertFails(deleteDoc(doc(as('uB'), 'pairingCodes', CODE)));
-  await assertSucceeds(deleteDoc(doc(as('uA'), 'pairingCodes', CODE)));
+  await assertFails(updateDoc(doc(as('uB'), 'pairingCodes', CODE), {
+    revoked: true, status: 'cancelled', revokedAt: serverTimestamp(),
+  }));
+  await assertSucceeds(updateDoc(doc(as('uA'), 'pairingCodes', CODE), {
+    revoked: true, status: 'cancelled', revokedAt: serverTimestamp(),
+  }));
 });
 
 test('pair membership cannot be changed by a member', async () => {
