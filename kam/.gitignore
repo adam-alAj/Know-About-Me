@@ -43,3 +43,16 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Secrets and environment files (SRS NFR-029). Defence in depth: server-side
+# credentials must never enter this repository.
+*.env
+*.env.*
+!.env.example
+*.pem
+*.p12
+*.jks
+*.keystore
+service-account*.json
+*serviceAccount*.json
+secrets.json
