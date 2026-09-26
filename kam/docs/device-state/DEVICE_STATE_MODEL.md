@@ -1,11 +1,13 @@
-# Device State Model (Phase 6)
+# Device State Model (Phases 6–8)
 
 `DeviceStateSnapshot` is a partial point-in-time local observation with
 `deviceId`, `userId`, UTC `collectedAt`, optional UTC `reportedAt`, and a map of
 capabilities to `StateObservation` values. Missing map entries are permitted.
 Its optional typed `battery` value contains separate percentage, charging,
 duration, and source observations plus a charging start timestamp when that
-start was observed.
+start was observed. Its optional typed `network` value separates connectivity
+transport, Internet reachability, online status, last observed online time,
+and an offline duration that exists only after an observed transition.
 
 Each observation can carry a value, `observedAt`, `updatedAt`, producer/source,
 platform, permission state, and a safe error description. Its availability is
@@ -31,17 +33,95 @@ The snapshot `toJson()` shape is the Phase 11 starting contract:
   "userId": "authenticated-owner",
   "collectedAt": "2026-09-26T12:00:00.000Z",
   "reportedAt": null,
-  "capabilities": {
-    "battery": {
+  "battery": {
+    "percentage": {
       "availability": "available",
       "value": 72,
       "observedAt": "2026-09-26T12:00:00.000Z",
+      "updatedAt": "2026-09-26T12:00:00.000Z",
+      "source": "android",
+      "permissionState": null,
+      "platform": "android",
+      "error": null
+    },
+    "chargingState": {
+      "availability": "available",
+      "value": "discharging",
+      "observedAt": "2026-09-26T12:00:00.000Z",
+      "updatedAt": "2026-09-26T12:00:00.000Z",
+      "source": "android",
+      "permissionState": null,
+      "platform": "android",
+      "error": null
+    },
+    "chargingDuration": {
+      "availability": "unavailable",
+      "value": null,
+      "observedAt": "2026-09-26T12:00:00.000Z",
       "updatedAt": null,
-      "source": "platform-adapter",
+      "source": "observed_transition",
+      "permissionState": null,
+      "platform": "android",
+      "error": null
+    },
+    "chargingSource": {
+      "availability": "available",
+      "value": "unknown",
+      "observedAt": "2026-09-26T12:00:00.000Z",
+      "updatedAt": null,
+      "source": "android",
+      "permissionState": null,
+      "platform": "android",
+      "error": null
+    },
+    "chargingStartedAt": null
+  },
+  "network": {
+    "connectivity": {
+      "availability": "available",
+      "value": "wifi",
+      "observedAt": "2026-09-26T12:00:00.000Z",
+      "updatedAt": "2026-09-26T12:00:00.000Z",
+      "source": "android",
+      "permissionState": null,
+      "platform": "android",
+      "error": null
+    },
+    "internet": {
+      "availability": "available",
+      "value": "available",
+      "observedAt": "2026-09-26T12:00:00.000Z",
+      "updatedAt": "2026-09-26T12:00:00.000Z",
+      "source": "android",
+      "permissionState": null,
+      "platform": "android",
+      "error": null
+    },
+    "status": {
+      "availability": "available",
+      "value": "online",
+      "observedAt": "2026-09-26T12:00:00.000Z",
+      "updatedAt": "2026-09-26T12:00:00.000Z",
+      "source": "android",
+      "permissionState": null,
+      "platform": "android",
+      "error": null
+    },
+    "lastOnlineAt": "2026-09-26T12:00:00.000Z",
+    "offlineStartedAt": null,
+    "offlineDuration": {
+      "availability": "unavailable",
+      "value": null,
+      "observedAt": "2026-09-26T12:00:00.000Z",
+      "updatedAt": null,
+      "source": "observed_transition",
       "permissionState": null,
       "platform": "android",
       "error": null
     }
+  },
+  "capabilities": {
+    "location": { "availability": "unsupported", "value": null }
   }
 }
 ```

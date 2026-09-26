@@ -20,10 +20,11 @@ Legend for **Reliable?**:
 | Charging state | `BatteryManager.isCharging`, `EXTRA_STATUS` | `UIDevice.batteryState` | Yes | No | Distinguish charging / not charging / full. |
 | Charging duration | Derived from observed start/stop transitions | Derived from observed start/stop transitions | Partial | No | Correct only while transitions are observed. Never assume charging continued while state was unknown (FR-010). |
 | Battery state changes | `ACTION_BATTERY_CHANGED` / `ACTION_POWER_CONNECTED/DISCONNECTED` | KVO on `batteryLevel`/`batteryState` | Partial | No | Background delivery depends on the app being alive or scheduled. |
-| Network connectivity | `ConnectivityManager` + `NetworkCallback` | `NWPathMonitor` | Yes | Android: `ACCESS_NETWORK_STATE` | Reports transport (Wi-Fi/mobile) and reachability, not internet quality. |
-| Online / offline (app to backend) | App-derived from successful sync | App-derived from successful sync | Yes | No | This is the *app's* reachability, not proof about the person (FR-070). |
-| Last online timestamp | Last successful backend sync | Last successful backend sync | Yes | No | An observation, not a guarantee of current reachability. |
-| Offline duration | Derived | Derived | Partial | No | Derived from last-seen; becomes stale while the app is suspended. |
+| Network connectivity | `ConnectivityManager` + default `NetworkCallback` | `NWPathMonitor` | Yes | Android: `ACCESS_NETWORK_STATE` | Phase 8 local path observation; does not include private network identifiers. |
+| Internet reachability | `NET_CAPABILITY_VALIDATED` | Not exposed by `NWPathMonitor` | Partial | Android: `ACCESS_NETWORK_STATE` | iOS remains unknown; Android validation is OS evidence, not Firebase reachability. |
+| Online / offline (local path) | Validated default route | Satisfied network path | Partial | Android: `ACCESS_NETWORK_STATE` | Local OS-path semantics only; Firebase/backend availability remains separate. |
+| Last online timestamp | Last locally observed online path | Last locally observed satisfied path | Partial | Android: `ACCESS_NETWORK_STATE` | Local historical observation, not proof of continuous phone power or usage. |
+| Offline duration | Observed online-to-offline transition | Observed satisfied-to-unsatisfied transition | Partial | Android: `ACCESS_NETWORK_STATE` | Unknown after restart/lifecycle gaps; never derived from data age. |
 | Screen / activity state | `ACTION_SCREEN_ON/OFF` only while a receiver is registered; `UsageStatsManager` approximations | **Not available** | No | Android: `PACKAGE_USAGE_STATS` (special) | iOS exposes no screen on/off API. Model as *unsupported* on iOS. |
 | App activity (own app) | `ProcessLifecycleOwner` | `UIApplication` lifecycle | Yes | No | Only the app's own foreground/background state; says nothing about the phone's screen. |
 | Last activity timestamp | Derived from own app lifecycle / device events | Derived from own app lifecycle | Partial | No | Must be described as "last *observable* activity" (FR-017). |

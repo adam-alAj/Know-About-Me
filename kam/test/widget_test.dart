@@ -19,9 +19,9 @@ void main() {
   ) async {
     await pumpTestApp(tester);
 
-    // Network and availability are still unsupported. Battery and charging
-    // are shown from the local battery collector below.
-    expect(find.text('Unknown'), findsNWidgets(2));
+    // Availability is still an unsupported legacy metric. Battery and network
+    // status are presented by their local collectors below.
+    expect(find.text('Unknown'), findsOneWidget);
   });
 
   testWidgets('partner area shows an empty state rather than fake data', (

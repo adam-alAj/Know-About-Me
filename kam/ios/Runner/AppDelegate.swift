@@ -1,4 +1,5 @@
 import Flutter
+import Network
 import UIKit
 
 private final class BatteryEventHandler: NSObject, FlutterStreamHandler {
@@ -61,6 +62,72 @@ private func batteryReading() -> [String: Any] {
   ]
 }
 
+private final class NetworkEventHandler: NSObject, FlutterStreamHandler {
+  private var monitor: NWPathMonitor?
+  private var eventSink: FlutterEventSink?
+
+  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+    eventSink = events
+    let pathMonitor = NWPathMonitor()
+    monitor = pathMonitor
+    pathMonitor.pathUpdateHandler = { [weak self] path in
+      DispatchQueue.main.async {
+        self?.eventSink?(networkReading(path))
+      }
+    }
+    pathMonitor.start(queue: DispatchQueue(label: "kam.network-monitor"))
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    monitor?.cancel()
+    monitor = nil
+    eventSink = nil
+    return nil
+  }
+}
+
+private func networkReading(_ path: NWPath) -> [String: String] {
+  switch path.status {
+  case .satisfied:
+    let connectivityType: String
+    if path.usesInterfaceType(.wifi) {
+      connectivityType = "wifi"
+    } else if path.usesInterfaceType(.cellular) {
+      connectivityType = "mobile"
+    } else if path.usesInterfaceType(.wiredEthernet) {
+      connectivityType = "ethernet"
+    } else {
+      connectivityType = "unknown"
+    }
+    // NWPath reports whether a connection path is usable; it does not verify
+    // general Internet or Firebase reachability.
+    return [
+      "connectivityType": connectivityType,
+      "internetReachability": "unknown",
+      "onlineStatus": "online",
+    ]
+  case .unsatisfied:
+    return [
+      "connectivityType": "none",
+      "internetReachability": "unavailable",
+      "onlineStatus": "offline",
+    ]
+  case .requiresConnection:
+    return [
+      "connectivityType": "unknown",
+      "internetReachability": "unknown",
+      "onlineStatus": "unknown",
+    ]
+  @unknown default:
+    return [
+      "connectivityType": "unknown",
+      "internetReachability": "unknown",
+      "onlineStatus": "unknown",
+    ]
+  }
+}
+
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   override func application(
@@ -94,5 +161,30 @@ private func batteryReading() -> [String: Any] {
       binaryMessenger: registrar.messenger()
     )
     eventChannel.setStreamHandler(BatteryEventHandler())
+
+    let networkMethodChannel = FlutterMethodChannel(
+      name: "kam/device_network",
+      binaryMessenger: registrar.messenger()
+    )
+    networkMethodChannel.setMethodCallHandler { call, result in
+      guard call.method == "getCurrentNetworkState" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let monitor = NWPathMonitor()
+      monitor.pathUpdateHandler = { path in
+        DispatchQueue.main.async {
+          result(networkReading(path))
+          monitor.cancel()
+        }
+      }
+      monitor.start(queue: DispatchQueue(label: "kam.network-read"))
+    }
+
+    let networkEventChannel = FlutterEventChannel(
+      name: "kam/device_network/events",
+      binaryMessenger: registrar.messenger()
+    )
+    networkEventChannel.setStreamHandler(NetworkEventHandler())
   }
 }

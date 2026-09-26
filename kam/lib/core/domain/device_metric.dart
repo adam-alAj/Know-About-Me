@@ -13,6 +13,8 @@ enum DeviceMetric {
   chargingState,
   chargingDuration,
   networkStatus,
+  networkConnectivity,
+  internetReachability,
   deviceAvailability,
   offlineDuration,
   lastActivity,

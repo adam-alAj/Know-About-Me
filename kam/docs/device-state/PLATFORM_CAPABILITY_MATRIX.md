@@ -1,15 +1,18 @@
 # Platform Capability Matrix
 
-Phase 6 supplied the adapter boundary; Phase 7 adds native battery/charging
-collection. Other runtime capabilities remain unsupported until their phase
-adds a collector. The matrix distinguishes OS support from the implementation
-currently present in this project.
+Phase 6 supplied the adapter boundary; Phases 7 and 8 add native battery,
+charging, and network collection. Other runtime capabilities remain unsupported
+until their phase adds a collector. The matrix distinguishes OS support from the
+implementation currently present in this project.
 
-| Capability | Android | iOS | Permission | Background support | Phase 7 status / limitation |
+| Capability | Android | iOS | Permission | Background support | Implementation status / limitation |
 |---|---|---|---|---|---|
 | Battery | `ACTION_BATTERY_CHANGED` level/scale | `UIDevice.batteryLevel` while monitoring is enabled | None | Android receiver while process runs; iOS notifications while app is active | Implemented in Phase 7; invalid/null levels remain errors/unavailable |
 | Charging | Battery intent status and plugged source | `UIDevice.batteryState` (charging/full/unplugged/unknown) | None | Event driven while app runs; app restart loses unobserved transitions | Implemented in Phase 7; iOS charger source unsupported |
-| Network | Connectivity APIs exist | Network path API exists | Android network-state permission | May become stale | Collector deferred to Phase 8; transport is not proof of backend reachability |
+| Network transport | `ConnectivityManager` default network callback | `NWPathMonitor` | Android `ACCESS_NETWORK_STATE`; none on iOS | Event-driven only while app/process monitoring is active | Implemented in Phase 8; no Wi-Fi identifiers or addresses collected |
+| Internet reachability | System `NET_CAPABILITY_VALIDATED` evidence | Not directly validated by `NWPathMonitor` | Same as transport | May become stale | Android validated/unvalidated; iOS remains unknown for a satisfied path |
+| Online / offline | Validated default route is online | Satisfied path is online | Same as transport | App can be suspended or terminated | Does not mean Firebase reachable, person active, or device powered on |
+| Offline duration | Observed online-to-offline transition | Observed satisfied-to-unsatisfied transition | None | Resets across lifecycle gaps | Unknown unless start observed in active monitoring session |
 | Screen state | Limited receiver/usage APIs | No general screen-state API | Android special usage access for some signals | Restricted | Deferred; do not claim parity or continuous state |
 | Activity | Own app lifecycle | Own app lifecycle | None for own-app lifecycle | Restricted | Device activity classification deferred to Phase 9 |
 | Location | Foreground/background APIs | When-in-use/always APIs | Location permission | Limited/opportunistic | Deferred to Phase 10; no permission added/requested |
@@ -23,6 +26,11 @@ BatteryManager](https://developer.android.com/reference/android/os/BatteryManage
 [Apple battery level](https://developer.apple.com/documentation/uikit/uidevice/batterylevel),
 [Apple battery state](https://developer.apple.com/documentation/uikit/uidevice/batterystate-swift.enum),
 and [Apple battery monitoring](https://developer.apple.com/documentation/uikit/uidevice/isbatterymonitoringenabled).
+
+Phase 8 network details and platform references are in
+[`NETWORK_MONITORING.md`](NETWORK_MONITORING.md). In particular, iOS satisfied
+path is not proof of Internet access, and Android validation is not proof that
+Firebase or any particular backend is reachable.
 
 The project has Android and iOS runner folders; Android min SDK follows
 `flutter.minSdkVersion`, and the iOS deployment target is 13.0. There is no

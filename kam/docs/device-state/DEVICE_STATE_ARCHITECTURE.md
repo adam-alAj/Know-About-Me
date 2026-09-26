@@ -1,7 +1,7 @@
 # Device State Architecture (Phase 6)
 
 ```text
-Native APIs (battery implemented; other collectors deferred)
+Native APIs (battery + network implemented; other collectors deferred)
     ↓
 PlatformDeviceStateAdapter
     ↓
@@ -18,9 +18,11 @@ Firestore synchronization (Phase 11; not implemented)
 
 The Android/iOS boundary is `PlatformDeviceStateAdapter`; capability reads are
 isolated so one failure cannot discard other readings. Battery and charging use
-a dedicated event-driven native bridge and collector; later phases add the
-remaining capability collectors. The legacy dashboard model remains available
-for existing presentation consumers.
+a dedicated event-driven native bridge and collector. Network transport,
+reachability, and online/offline observations use an independent event-driven
+bridge and collector. Both typed values are part of the local snapshot; later
+phases add remaining capability collectors. The legacy dashboard model remains
+available for existing presentation consumers.
 The application continues using Riverpod and the existing legacy `DeviceState`
 model for current presentation consumers.
 

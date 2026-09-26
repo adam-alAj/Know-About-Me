@@ -17,6 +17,7 @@ import '../../../core/ui/widgets/section_header.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
 import '../../device_state/domain/models/device_state.dart';
 import '../../device_state/domain/models/battery_state.dart';
+import '../../device_state/domain/models/network_state.dart';
 import '../../device_state/domain/models/device_state_snapshot.dart';
 import '../../device_state/presentation/providers/device_state_providers.dart';
 import '../../device_state/presentation/widgets/metric_tile.dart';
@@ -34,6 +35,7 @@ class DashboardScreen extends ConsumerWidget {
     final config = ref.watch(appConfigProvider);
     final deviceStateAsync = ref.watch(currentDeviceStateProvider);
     final batteryStateAsync = ref.watch(currentLocalBatteryStateProvider);
+    final networkStateAsync = ref.watch(currentLocalNetworkStateProvider);
 
     // One mapping for every async read. A successful read shows the metrics;
     // each tile then reports its own availability, which is where "Unknown"
@@ -95,6 +97,17 @@ class DashboardScreen extends ConsumerWidget {
               error: (_, _) => const Text('Battery state temporarily unavailable.'),
             ),
           ),
+          const SizedBox(height: AppSpacing.sm),
+          AppCard(
+            child: networkStateAsync.when(
+              data: (state) => _NetworkSummary(
+                state: state,
+                now: ref.watch(clockProvider).nowUtc(),
+              ),
+              loading: () => const Text('Reading local network state...'),
+              error: (_, _) => const Text('Network state temporarily unavailable.'),
+            ),
+          ),
           const SizedBox(height: AppSpacing.lg),
           const SectionHeader(title: 'Connected partner'),
           AppButton.secondary(
@@ -120,6 +133,111 @@ class DashboardScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+}
+
+class _NetworkSummary extends StatelessWidget {
+  const _NetworkSummary({required this.state, required this.now});
+
+  final NetworkState state;
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = state.status;
+    final stale = state.freshnessAt(now) == DataFreshness.stale;
+    final observedAt = status.observedAt;
+    final lastOnline = state.lastOnlineAt;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Network'),
+        const SizedBox(height: AppSpacing.xs),
+        Text('Connectivity: ${_connectivityLabel(state.connectivity)}'),
+        Text('Internet access: ${_internetLabel(state.internet)}'),
+        Text(
+          'Status: ${stale ? 'Stale — last observed ' : ''}${_networkStatusLabel(status)}',
+        ),
+        if (lastOnline != null)
+          Text('Last online: ${_relativeTime(lastOnline, now)}'),
+        if (status.value == NetworkOnlineStatus.offline)
+          Text('Offline duration: ${_durationObservationLabel(state.offlineDuration)}'),
+        Text(
+          observedAt == null
+              ? 'Network update time unknown.'
+              : 'Last updated ${_relativeTime(observedAt, now)}.',
+        ),
+      ],
+    );
+  }
+
+  static String _connectivityLabel(StateObservation<ConnectivityType> observation) {
+    final value = observation.value;
+    if (observation.availability != CapabilityAvailability.available || value == null) {
+      return _availabilityLabel(observation.availability);
+    }
+    return switch (value) {
+      ConnectivityType.wifi => 'Wi-Fi',
+      ConnectivityType.mobile => 'Mobile',
+      ConnectivityType.ethernet => 'Ethernet',
+      ConnectivityType.bluetooth => 'Bluetooth',
+      ConnectivityType.vpn => 'VPN',
+      ConnectivityType.none => 'None',
+      ConnectivityType.unknown => 'Unknown',
+    };
+  }
+
+  static String _internetLabel(StateObservation<InternetReachability> observation) {
+    if (observation.availability != CapabilityAvailability.available ||
+        observation.value == null) {
+      return _availabilityLabel(observation.availability);
+    }
+    return switch (observation.value!) {
+      InternetReachability.available => 'Available',
+      InternetReachability.unavailable => 'Unavailable',
+      InternetReachability.unknown => 'Unknown',
+    };
+  }
+
+  static String _networkStatusLabel(StateObservation<NetworkOnlineStatus> observation) {
+    if (observation.availability != CapabilityAvailability.available ||
+        observation.value == null) {
+      return _availabilityLabel(observation.availability);
+    }
+    return switch (observation.value!) {
+      NetworkOnlineStatus.online => 'Online',
+      NetworkOnlineStatus.offline => 'Offline',
+      NetworkOnlineStatus.unknown => 'Unknown',
+    };
+  }
+
+  static String _durationObservationLabel(StateObservation<Duration> observation) {
+    final duration = observation.value;
+    if (observation.availability == CapabilityAvailability.available && duration != null) {
+      final totalMinutes = duration.inMinutes;
+      final hours = totalMinutes ~/ 60;
+      final minutes = totalMinutes % 60;
+      return hours == 0 ? '${minutes}m' : '${hours}h ${minutes}m';
+    }
+    return _availabilityLabel(observation.availability);
+  }
+
+  static String _availabilityLabel(CapabilityAvailability availability) => switch (availability) {
+    CapabilityAvailability.available => 'Unknown',
+    CapabilityAvailability.unavailable => 'Unavailable',
+    CapabilityAvailability.unknown => 'Unknown',
+    CapabilityAvailability.unsupported => 'Unsupported',
+    CapabilityAvailability.permissionDenied => 'Permission not granted',
+    CapabilityAvailability.error => 'Temporarily unavailable',
+    CapabilityAvailability.stale => 'Stale',
+  };
+
+  static String _relativeTime(DateTime timestamp, DateTime now) {
+    final age = now.toUtc().difference(timestamp.toUtc());
+    if (age.isNegative || age.inSeconds < 60) return 'just now';
+    if (age.inMinutes < 60) return '${age.inMinutes}m ago';
+    if (age.inHours < 24) return '${age.inHours}h ago';
+    return '${age.inDays}d ago';
   }
 }
 
@@ -225,18 +343,6 @@ class _DeviceMetricsList extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        MetricTile<NetworkStatus>(
-          label: 'Network',
-          icon: Icons.wifi,
-          value: state.networkStatus,
-          format: (value) => switch (value) {
-            NetworkStatus.online => 'Online',
-            NetworkStatus.offline => 'Offline',
-            NetworkStatus.wifi => 'Wi-Fi',
-            NetworkStatus.mobile => 'Mobile data',
-            NetworkStatus.unknown => 'Unknown',
-          },
-        ),
         MetricTile<DeviceAvailabilityState>(
           label: 'Availability',
           icon: Icons.sensors,

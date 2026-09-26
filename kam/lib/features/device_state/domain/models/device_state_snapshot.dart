@@ -1,5 +1,6 @@
 import '../../../../core/domain/device_metric.dart';
 import 'battery_state.dart';
+import 'network_state.dart';
 import 'state_observation.dart';
 
 export 'state_observation.dart';
@@ -22,6 +23,7 @@ class DeviceStateSnapshot {
     required this.capabilities,
     this.reportedAt,
     this.battery,
+    this.network,
   });
 
   final String deviceId;
@@ -30,6 +32,7 @@ class DeviceStateSnapshot {
   final DateTime? reportedAt;
   final Map<DeviceMetric, StateObservation<Object?>> capabilities;
   final BatteryState? battery;
+  final NetworkState? network;
 
   DeviceStateSnapshot withBattery(BatteryState value, {DateTime? observedAt}) =>
       DeviceStateSnapshot(
@@ -39,6 +42,18 @@ class DeviceStateSnapshot {
         reportedAt: reportedAt,
         capabilities: capabilities,
         battery: value,
+        network: network,
+      );
+
+  DeviceStateSnapshot withNetwork(NetworkState value, {DateTime? observedAt}) =>
+      DeviceStateSnapshot(
+        deviceId: deviceId,
+        userId: userId,
+        collectedAt: observedAt?.toUtc() ?? collectedAt,
+        reportedAt: reportedAt,
+        capabilities: capabilities,
+        battery: battery,
+        network: value,
       );
 
   StateObservation<Object?>? operator [](DeviceMetric capability) => capabilities[capability];
@@ -49,6 +64,7 @@ class DeviceStateSnapshot {
     'collectedAt': collectedAt.toUtc().toIso8601String(),
     'reportedAt': reportedAt?.toUtc().toIso8601String(),
     'battery': battery?.toJson(),
+    'network': network?.toJson(),
     'capabilities': {
       for (final entry in capabilities.entries) entry.key.name: entry.value.toJson(),
     },
@@ -65,6 +81,11 @@ class DeviceStateSnapshot {
           ? null
           : BatteryState.fromJson(
               Map<String, Object?>.from(json['battery']! as Map),
+            ),
+      network: json['network'] == null
+          ? null
+          : NetworkState.fromJson(
+              Map<String, Object?>.from(json['network']! as Map),
             ),
       capabilities: {
         for (final entry in raw.entries)

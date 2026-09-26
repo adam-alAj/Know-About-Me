@@ -7,6 +7,8 @@ import '../../domain/repositories/device_state_repository.dart';
 import '../../domain/sources/device_state_provider.dart';
 import '../../domain/sources/platform_device_state_adapter.dart';
 import '../../domain/services/battery_charging_collector.dart';
+import '../../domain/services/network_state_collector.dart';
+
 
 /// Collects capabilities independently. A single native API failure becomes
 /// an error observation and does not discard successful sibling observations.
@@ -18,6 +20,7 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     required this.clock,
     required this.logger,
     this.batteryCollector,
+    this.networkCollector,
   });
 
   final Future<String> Function() deviceId;
@@ -26,6 +29,7 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
   final DateTime Function() clock;
   final AppLogger logger;
   final BatteryChargingCollector? batteryCollector;
+  final NetworkStateCollector? networkCollector;
 
   @override
   Map<DeviceMetric, DeviceCapabilityStatus> getCapabilityStatus() {
@@ -35,6 +39,8 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     };
     final battery = batteryCollector;
     if (battery != null) status.addAll(battery.capabilityStatus);
+    final network = networkCollector;
+    if (network != null) status.addAll(network.capabilityStatus);
     return Map.unmodifiable(status);
   }
 
@@ -46,7 +52,8 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     for (final capability in DeviceMetric.values) {
       // Without a battery collector, retain Phase 6's generic adapter path so
       // existing platforms and test adapters can still supply those metrics.
-      if (batteryCollector != null && _batteryMetrics.contains(capability)) {
+      if ((batteryCollector != null && _batteryMetrics.contains(capability)) ||
+          (networkCollector != null && _networkMetrics.contains(capability))) {
         continue;
       }
       try {
@@ -75,6 +82,9 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     final battery = batteryCollector == null
         ? null
         : await batteryCollector!.refresh();
+    final network = networkCollector == null
+        ? null
+        : await networkCollector!.refresh();
     logger.info('Device state collection completed', context: {
       'capabilityCount': observations.length,
     });
@@ -84,6 +94,7 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
       collectedAt: collectedAt,
       capabilities: Map.unmodifiable(observations),
       battery: battery,
+      network: network,
     );
   }
 
@@ -92,13 +103,32 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     var snapshot = await getCurrentState();
     yield snapshot;
     final collector = batteryCollector;
-    if (collector == null) return;
-    await for (final battery in collector.watchBatteryState()) {
-      snapshot = snapshot.withBattery(
-        battery,
-        observedAt: clock().toUtc(),
-      );
-      yield snapshot;
+    final network = networkCollector;
+    if (collector == null && network == null) return;
+
+    final updates = StreamController<DeviceStateSnapshot>();
+    final subscriptions = <Future<void> Function()>[];
+    if (collector != null) {
+      final subscription = collector.watchBatteryState().listen((battery) {
+        snapshot = snapshot.withBattery(battery, observedAt: clock().toUtc());
+        updates.add(snapshot);
+      }, onError: updates.addError);
+      subscriptions.add(subscription.cancel);
+    }
+    if (network != null) {
+      final subscription = network.watchNetworkState().listen((value) {
+        snapshot = snapshot.withNetwork(value, observedAt: clock().toUtc());
+        updates.add(snapshot);
+      }, onError: updates.addError);
+      subscriptions.add(subscription.cancel);
+    }
+    try {
+      yield* updates.stream;
+    } finally {
+      for (final cancel in subscriptions) {
+        await cancel();
+      }
+      await updates.close();
     }
   }
 
@@ -107,6 +137,13 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     DeviceMetric.chargingState,
     DeviceMetric.chargingDuration,
     DeviceMetric.chargingSource,
+  };
+
+  static const _networkMetrics = <DeviceMetric>{
+    DeviceMetric.networkStatus,
+    DeviceMetric.networkConnectivity,
+    DeviceMetric.internetReachability,
+    DeviceMetric.offlineDuration,
   };
 }
 
