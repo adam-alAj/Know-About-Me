@@ -22,4 +22,5 @@ enum DeviceMetric {
   homePresence,
   screenState,
   backgroundMonitoring,
+  chargingSource,
 }

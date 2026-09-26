@@ -1,7 +1,7 @@
 # Device State Architecture (Phase 6)
 
 ```text
-Native APIs (future collectors)
+Native APIs (battery implemented; other collectors deferred)
     ↓
 PlatformDeviceStateAdapter
     ↓
@@ -17,8 +17,10 @@ Firestore synchronization (Phase 11; not implemented)
 ```
 
 The Android/iOS boundary is `PlatformDeviceStateAdapter`; capability reads are
-isolated so one failure cannot discard other readings. The current Phase 6
-adapter reports capabilities unsupported: later phases add actual collectors.
+isolated so one failure cannot discard other readings. Battery and charging use
+a dedicated event-driven native bridge and collector; later phases add the
+remaining capability collectors. The legacy dashboard model remains available
+for existing presentation consumers.
 The application continues using Riverpod and the existing legacy `DeviceState`
 model for current presentation consumers.
 
@@ -51,4 +53,3 @@ hardware data and is not a credential. Reinstall clears app-private
 preferences, so reinstall generates a new ID; device replacement also gets a
 new ID. Account/pair ownership remains the authenticated user and Firestore
 Rules, never this ID.
-

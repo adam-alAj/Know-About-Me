@@ -19,9 +19,9 @@ void main() {
   ) async {
     await pumpTestApp(tester);
 
-    // Battery, charging, network and availability each report Unknown because
-    // no native collector exists yet (SRS FR-048, constraint 4).
-    expect(find.text('Unknown'), findsNWidgets(4));
+    // Network and availability are still unsupported. Battery and charging
+    // are shown from the local battery collector below.
+    expect(find.text('Unknown'), findsNWidgets(2));
   });
 
   testWidgets('partner area shows an empty state rather than fake data', (

@@ -3,6 +3,9 @@
 `DeviceStateSnapshot` is a partial point-in-time local observation with
 `deviceId`, `userId`, UTC `collectedAt`, optional UTC `reportedAt`, and a map of
 capabilities to `StateObservation` values. Missing map entries are permitted.
+Its optional typed `battery` value contains separate percentage, charging,
+duration, and source observations plus a charging start timestamp when that
+start was observed.
 
 Each observation can carry a value, `observedAt`, `updatedAt`, producer/source,
 platform, permission state, and a safe error description. Its availability is
@@ -46,4 +49,3 @@ The snapshot `toJson()` shape is the Phase 11 starting contract:
 Do not serialize raw hardware identifiers, credentials, or partner state into a
 local device's document. Remote ownership and pair membership must be derived
 and enforced by auth plus Security Rules, not trusted from client-supplied IDs.
-

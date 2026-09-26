@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../app/providers.dart';
 import '../../../app/router/app_routes.dart';
 import '../../../core/constants/app_spacing.dart';
+import '../../../core/freshness/data_freshness.dart';
 import '../../../core/ui/data_state_view.dart';
 import '../../../core/ui/presentation_mapping.dart';
 import '../../../core/ui/widgets/app_button.dart';
@@ -15,6 +16,8 @@ import '../../../core/ui/widgets/empty_view.dart';
 import '../../../core/ui/widgets/section_header.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
 import '../../device_state/domain/models/device_state.dart';
+import '../../device_state/domain/models/battery_state.dart';
+import '../../device_state/domain/models/device_state_snapshot.dart';
 import '../../device_state/presentation/providers/device_state_providers.dart';
 import '../../device_state/presentation/widgets/metric_tile.dart';
 
@@ -30,6 +33,7 @@ class DashboardScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final config = ref.watch(appConfigProvider);
     final deviceStateAsync = ref.watch(currentDeviceStateProvider);
+    final batteryStateAsync = ref.watch(currentLocalBatteryStateProvider);
 
     // One mapping for every async read. A successful read shows the metrics;
     // each tile then reports its own availability, which is where "Unknown"
@@ -80,6 +84,17 @@ class DashboardScreen extends ConsumerWidget {
               ),
             ),
           ),
+          const SizedBox(height: AppSpacing.md),
+          AppCard(
+            child: batteryStateAsync.when(
+              data: (state) => _BatterySummary(
+                state: state,
+                now: ref.watch(clockProvider).nowUtc(),
+              ),
+              loading: () => const Text('Reading local battery state…'),
+              error: (_, _) => const Text('Battery state temporarily unavailable.'),
+            ),
+          ),
           const SizedBox(height: AppSpacing.lg),
           const SectionHeader(title: 'Connected partner'),
           AppButton.secondary(
@@ -108,6 +123,83 @@ class DashboardScreen extends ConsumerWidget {
   }
 }
 
+class _BatterySummary extends StatelessWidget {
+  const _BatterySummary({required this.state, required this.now});
+
+  final BatteryState state;
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    final percentage = state.percentage;
+    final charging = state.chargingState;
+    final duration = state.chargingDuration;
+    final isCharging = charging.value == BatteryChargingState.charging ||
+        charging.value == BatteryChargingState.full;
+    final observedAt = percentage.observedAt ?? charging.observedAt;
+    final age = observedAt == null ? null : now.difference(observedAt);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Battery & charging'),
+        const SizedBox(height: AppSpacing.xs),
+        Text('Battery: ${_observationLabel(percentage, (value) => '$value%')}'),
+        Text('Charging: ${_observationLabel(charging, _chargingLabel)}'),
+        if (isCharging)
+          Text('Charging duration: ${_observationLabel(duration, _durationLabel)}'),
+        const SizedBox(height: AppSpacing.xs),
+        Text(_freshnessLabel(state, now, age)),
+      ],
+    );
+  }
+
+  static String _observationLabel<T>(
+    StateObservation<T> observation,
+    String Function(T value) format,
+  ) {
+    final value = observation.value;
+    if (observation.availability == CapabilityAvailability.available &&
+        value != null) {
+      return format(value);
+    }
+    return switch (observation.availability) {
+      CapabilityAvailability.unsupported => 'Unsupported',
+      CapabilityAvailability.permissionDenied => 'Permission not granted',
+      CapabilityAvailability.error => 'Temporarily unavailable',
+      CapabilityAvailability.stale => 'Stale',
+      CapabilityAvailability.unknown => 'Unknown',
+      CapabilityAvailability.unavailable => 'Unavailable',
+      CapabilityAvailability.available => 'Unknown',
+    };
+  }
+
+  static String _chargingLabel(BatteryChargingState value) => switch (value) {
+    BatteryChargingState.charging => 'Charging',
+    BatteryChargingState.full => 'Full',
+    BatteryChargingState.discharging => 'Discharging',
+    BatteryChargingState.notCharging => 'Not charging',
+    BatteryChargingState.unknown => 'Unknown',
+  };
+
+  static String _durationLabel(Duration value) {
+    final minutes = value.inMinutes;
+    final hours = minutes ~/ 60;
+    final remainder = minutes % 60;
+    if (hours == 0 && remainder == 0) return 'Less than a minute';
+    if (hours == 0) return '${remainder}m';
+    return '${hours}h ${remainder}m';
+  }
+
+  static String _freshnessLabel(BatteryState state, DateTime now, Duration? age) {
+    if (state.freshnessAt(now) == DataFreshness.stale) {
+      return age == null ? 'Battery data is stale.' : 'Last updated ${age.inMinutes}m ago.';
+    }
+    if (age == null) return 'Battery update time unknown.';
+    return age.inSeconds < 60 ? 'Updated just now.' : 'Updated ${age.inMinutes}m ago.';
+  }
+}
+
 /// Whether the signed-in user has no profile document.
 ///
 /// Only a *resolved* read that returned `null` counts: a load in progress or a
@@ -133,23 +225,6 @@ class _DeviceMetricsList extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        MetricTile<int>(
-          label: 'Battery',
-          icon: Icons.battery_full,
-          value: state.batteryPercentage,
-          format: (value) => '$value%',
-        ),
-        MetricTile<ChargingState>(
-          label: 'Charging',
-          icon: Icons.bolt,
-          value: state.chargingState,
-          format: (value) => switch (value) {
-            ChargingState.charging => 'Charging',
-            ChargingState.notCharging => 'Not charging',
-            ChargingState.fullyCharged => 'Fully charged',
-            ChargingState.unknown => 'Unknown',
-          },
-        ),
         MetricTile<NetworkStatus>(
           label: 'Network',
           icon: Icons.wifi,

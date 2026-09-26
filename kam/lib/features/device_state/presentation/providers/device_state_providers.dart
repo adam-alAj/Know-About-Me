@@ -5,6 +5,7 @@ import '../../../../core/domain/device_metric.dart';
 import '../../../../core/result/result.dart';
 import '../../data/sources/unavailable_device_state_source.dart';
 import '../../data/providers/platform_device_state_provider.dart';
+import '../../data/battery/battery_platform_gateway.dart';
 import '../../data/repositories/local_device_state_repository.dart';
 import '../../data/services/app_device_identity.dart';
 import '../../data/services/shared_preferences_device_identity_store.dart';
@@ -12,9 +13,11 @@ import '../../data/sources/unavailable_platform_device_state_adapter.dart';
 import '../../domain/models/device_capability.dart';
 import '../../domain/models/device_state.dart';
 import '../../domain/models/device_state_snapshot.dart';
+import '../../domain/models/battery_state.dart';
 import '../../domain/repositories/device_state_repository.dart';
 import '../../domain/sources/device_state_provider.dart';
 import '../../domain/sources/device_state_source.dart';
+import '../../domain/services/battery_charging_collector.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 
 /// The device-state source for this platform.
@@ -52,6 +55,21 @@ final appDeviceIdentityProvider = Provider<AppDeviceIdentity>(
   (ref) => AppDeviceIdentity(SharedPreferencesDeviceIdentityStore()),
 );
 
+final batteryChargingCollectorProvider = Provider<BatteryChargingCollector>((ref) {
+  final platform = ref.watch(platformInfoProvider).platform;
+  final collector = BatteryChargingCollector(
+    gateway: MethodChannelBatteryGateway(platform.name),
+    now: () => ref.read(clockProvider).nowUtc(),
+  );
+  ref.onDispose(collector.dispose);
+  return collector;
+});
+
+/// Current local battery observation, independent of network and pairing.
+final currentLocalBatteryStateProvider = FutureProvider<BatteryState>(
+  (ref) => ref.watch(batteryChargingCollectorProvider).refresh(),
+);
+
 /// Local snapshot provider. Unauthenticated use gets an empty owner scope; no
 /// remote operation is exposed here. Phase 11 will require auth and pair rules.
 final deviceStateProvider = Provider<DeviceStateProvider>((ref) {
@@ -64,6 +82,7 @@ final deviceStateProvider = Provider<DeviceStateProvider>((ref) {
     adapter: adapter,
     clock: () => ref.read(clockProvider).nowUtc(),
     logger: ref.watch(loggerProvider),
+    batteryCollector: ref.watch(batteryChargingCollectorProvider),
   );
 });
 

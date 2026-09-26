@@ -6,6 +6,7 @@ import '../../domain/models/device_state_snapshot.dart';
 import '../../domain/repositories/device_state_repository.dart';
 import '../../domain/sources/device_state_provider.dart';
 import '../../domain/sources/platform_device_state_adapter.dart';
+import '../../domain/services/battery_charging_collector.dart';
 
 /// Collects capabilities independently. A single native API failure becomes
 /// an error observation and does not discard successful sibling observations.
@@ -16,6 +17,7 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     required this.adapter,
     required this.clock,
     required this.logger,
+    this.batteryCollector,
   });
 
   final Future<String> Function() deviceId;
@@ -23,12 +25,18 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
   final PlatformDeviceStateAdapter adapter;
   final DateTime Function() clock;
   final AppLogger logger;
+  final BatteryChargingCollector? batteryCollector;
 
   @override
-  Map<DeviceMetric, DeviceCapabilityStatus> getCapabilityStatus() => {
-    for (final capability in DeviceMetric.values)
-      capability: adapter.capabilityStatus(capability),
-  };
+  Map<DeviceMetric, DeviceCapabilityStatus> getCapabilityStatus() {
+    final status = <DeviceMetric, DeviceCapabilityStatus>{
+      for (final capability in DeviceMetric.values)
+        capability: adapter.capabilityStatus(capability),
+    };
+    final battery = batteryCollector;
+    if (battery != null) status.addAll(battery.capabilityStatus);
+    return Map.unmodifiable(status);
+  }
 
   @override
   Future<DeviceStateSnapshot> getCurrentState() async {
@@ -36,6 +44,11 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     logger.info('Device state collection started');
     final observations = <DeviceMetric, StateObservation<Object?>>{};
     for (final capability in DeviceMetric.values) {
+      // Without a battery collector, retain Phase 6's generic adapter path so
+      // existing platforms and test adapters can still supply those metrics.
+      if (batteryCollector != null && _batteryMetrics.contains(capability)) {
+        continue;
+      }
       try {
         final observation = await adapter.collect(capability);
         observations[capability] = observation;
@@ -59,6 +72,9 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
         );
       }
     }
+    final battery = batteryCollector == null
+        ? null
+        : await batteryCollector!.refresh();
     logger.info('Device state collection completed', context: {
       'capabilityCount': observations.length,
     });
@@ -67,13 +83,31 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
       userId: userId(),
       collectedAt: collectedAt,
       capabilities: Map.unmodifiable(observations),
+      battery: battery,
     );
   }
 
   @override
   Stream<DeviceStateSnapshot> watchState() async* {
-    yield await getCurrentState();
+    var snapshot = await getCurrentState();
+    yield snapshot;
+    final collector = batteryCollector;
+    if (collector == null) return;
+    await for (final battery in collector.watchBatteryState()) {
+      snapshot = snapshot.withBattery(
+        battery,
+        observedAt: clock().toUtc(),
+      );
+      yield snapshot;
+    }
   }
+
+  static const _batteryMetrics = <DeviceMetric>{
+    DeviceMetric.batteryPercentage,
+    DeviceMetric.chargingState,
+    DeviceMetric.chargingDuration,
+    DeviceMetric.chargingSource,
+  };
 }
 
 /// Small lifecycle-aware command surface. A caller starts/stops observation;
