@@ -1,10 +1,10 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../firebase_options.dart';
 import '../config/app_config.dart';
 import '../error/app_failure.dart';
 import '../logging/app_logger.dart';
-import 'firebase_config.dart';
 import 'firebase_emulators.dart';
 import 'firebase_error_mapper.dart';
 
@@ -12,10 +12,9 @@ import 'firebase_error_mapper.dart';
 ///
 /// ## Behaviour
 ///
-/// - Firebase is initialized **only** when [AppConfig.hasFirebaseConfiguration]
-///   is true. Otherwise initialization is skipped and the application continues
-///   offline with explicit non-available states (SRS constraint 10: no
-///   fabricated Firebase resources).
+/// - Firebase is initialized from the generated FlutterFire options for the
+///   current platform. An initialization failure is retained and the
+///   application continues with explicit non-available states.
 /// - Initialization happens exactly once, from `AppBootstrap`, never from a
 ///   widget or feature.
 /// - A failure is classified into an [AppFailure], retained in [lastFailure] for
@@ -24,8 +23,7 @@ import 'firebase_error_mapper.dart';
 /// - Device-state and location features do not depend on this class; they depend
 ///   on their own repositories/sources, so Firebase stays replaceable.
 ///
-/// Phase 3 initializes the SDK and connects emulators only. Authentication flows,
-/// Firestore repositories and messaging handlers arrive in later phases.
+/// Authentication and Firestore repositories are composed by feature providers.
 abstract final class FirebaseBootstrap {
   static bool _initialized = false;
   static AppFailure? _lastFailure;
@@ -47,26 +45,12 @@ abstract final class FirebaseBootstrap {
   }) async {
     _lastFailure = null;
 
-    if (config.hasPartialFirebaseConfiguration) {
-      // Loud, but non-fatal: a half-configured build is a configuration bug.
-      logger.warning(
-        'Firebase configuration is incomplete; continuing without Firebase.',
-        context: {'environment': config.environment.name},
-      );
-      _initialized = false;
-      return false;
-    }
-
-    if (!FirebaseConfig.isConfigured(config)) {
-      logger.info(
-        'Firebase is not configured for this build; continuing offline.',
-      );
-      _initialized = false;
-      return false;
-    }
-
     try {
-      await Firebase.initializeApp(options: FirebaseConfig.optionsFor(config));
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
+      }
 
       // Local development points at the Emulator Suite so it can never write to
       // production data. Emulator connection failures are non-fatal.
