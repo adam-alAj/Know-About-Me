@@ -49,18 +49,23 @@ app.*.map.json
 *.env
 *.env.*
 !.env.example
+!.env.*.example
+.env.local
+.env.*.local
 *.pem
 *.p12
 *.jks
 *.keystore
-service-account*.json
+*service-account*.json
 *serviceAccount*.json
-secrets.json
+*firebase-adminsdk*.json
+credentials*.json
+secrets*.json
 
 # Firebase / Node tooling (rules tests, emulator artefacts).
-# Client Firebase configuration is supplied via --dart-define, so these files
-# are never required in the repository. If a real project is configured later and
-# google-services.json is committed, remove the matching line deliberately.
+# Firebase client config (google-services.json) contains public app identifiers,
+# not server credentials. Keep local copies out of Git to avoid scanner noise;
+# firebase_options.dart is the app's checked-in runtime configuration.
 node_modules/
 firebase-debug.log
 firestore-debug.log
@@ -68,7 +73,7 @@ ui-debug.log
 pubsub-debug.log
 .firebase/
 firestore.rules.test.coverage/
-android/app/google-services.json
+**/google-services*.json
 auth_export.json
 firestore_export/
 

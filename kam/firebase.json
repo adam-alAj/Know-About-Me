@@ -1,1 +1,31 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"gendersocialapp","appId":"1:440239930081:android:499771be9c9d2d683655a0","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"gendersocialapp","configurations":{"android":"1:440239930081:android:499771be9c9d2d683655a0","ios":"1:440239930081:ios:6d9a186dc467f5e43655a0","macos":"1:440239930081:ios:6d9a186dc467f5e43655a0","web":"1:440239930081:web:22b3cdbc7a50c56d3655a0","windows":"1:440239930081:web:b25ecc9938f1dd253655a0"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "gendersocialapp",
+          "appId": "1:440239930081:android:499771be9c9d2d683655a0",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "gendersocialapp",
+          "configurations": {
+            "android": "1:440239930081:android:499771be9c9d2d683655a0",
+            "ios": "1:440239930081:ios:6d9a186dc467f5e43655a0",
+            "macos": "1:440239930081:ios:6d9a186dc467f5e43655a0",
+            "web": "1:440239930081:web:22b3cdbc7a50c56d3655a0",
+            "windows": "1:440239930081:web:b25ecc9938f1dd253655a0"
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "database": "(default)",
+    "location": "europe-west1",
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  }
+}
