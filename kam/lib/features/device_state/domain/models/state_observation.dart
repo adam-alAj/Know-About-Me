@@ -4,9 +4,23 @@ import '../../../../core/freshness/data_freshness.dart';
 enum DevicePermissionState {
   granted,
   denied,
+
+  /// The user declined and the OS will not show the prompt again. The
+  /// application must not keep asking (Phase 10, FR-056).
+  permanentlyDenied,
+
+  /// The OS blocks the permission for a reason the user cannot change here,
+  /// for example parental controls or an MDM policy.
   restricted,
+
+  /// Granted with reduced scope, for example approximate location.
   limited,
+
   notDetermined,
+
+  /// The platform reports a permission but not which state it is in.
+  unknown,
+
   notApplicable,
 }
 
@@ -17,6 +31,12 @@ enum CapabilityAvailability {
   unknown,
   unsupported,
   permissionDenied,
+
+  /// The OS-level service that provides this metric is switched off, which is
+  /// distinct from the app lacking permission (Phase 10: location services
+  /// disabled is not the same as permission denied).
+  serviceDisabled,
+
   error,
   stale,
 }

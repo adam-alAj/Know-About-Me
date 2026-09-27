@@ -11,9 +11,9 @@ import '../models/state_observation.dart';
 ///   window; older evidence becomes `stale` while keeping the historical
 ///   confirmation time.
 /// * With no positive evidence, the structural reason of the underlying
-///   observations wins: `unsupported`, `permissionDenied`, `error` or
-///   `unavailable`, in that order; only a genuinely empty picture is
-///   `unknown`.
+///   observations wins: `unsupported`, `permissionDenied`, `serviceDisabled`,
+///   `error` or `unavailable`, in that order; only a genuinely empty picture
+///   is `unknown`.
 /// * There is no power-state claim: missing evidence never becomes
 ///   "phone off". See `docs/device-state/ACTIVITY_AVAILABILITY.md`.
 class DeviceAvailabilityDeriver {
@@ -77,6 +77,13 @@ class DeviceAvailabilityDeriver {
     if (availabilities.contains(CapabilityAvailability.permissionDenied)) {
       return DeviceAvailabilityEvidence(
         availability: CapabilityAvailability.permissionDenied,
+        observedAt: at,
+        source: 'local_observations',
+      );
+    }
+    if (availabilities.contains(CapabilityAvailability.serviceDisabled)) {
+      return DeviceAvailabilityEvidence(
+        availability: CapabilityAvailability.serviceDisabled,
         observedAt: at,
         source: 'local_observations',
       );

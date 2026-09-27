@@ -2,21 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/firebase/firebase_providers.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
-import '../data/pairing_repository.dart';
-
-final pairingRepositoryProvider = Provider<PairingRepository?>((ref) {
-  if (!ref.watch(firebaseAvailableProvider)) return null;
-  return PairingRepository(ref.watch(firebaseFirestoreProvider));
-});
-
-final pairListProvider = StreamProvider((ref) {
-  final uid = ref.watch(currentIdentityProvider)?.uid;
-  final repository = ref.watch(pairingRepositoryProvider);
-  if (uid == null || repository == null) return const Stream.empty();
-  return repository.watchPairs(uid);
-});
+import 'providers/pairing_providers.dart';
 
 class PairingScreen extends ConsumerStatefulWidget {
   const PairingScreen({super.key});
@@ -47,7 +34,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
   Widget build(BuildContext context) {
     final repo = ref.watch(pairingRepositoryProvider);
     final uid = ref.watch(currentIdentityProvider)?.uid;
-    final pairs = ref.watch(pairListProvider);
+    final pairs = ref.watch(pairMembershipsProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('Pairing & consent')),
       body: ListView(padding: const EdgeInsets.all(20), children: [
@@ -70,23 +57,23 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
         Text('Connections', style: Theme.of(context).textTheme.titleLarge),
         if (pairs.isLoading) const Padding(padding: EdgeInsets.all(20), child: Center(child: CircularProgressIndicator())),
         if (pairs.hasError) const Text('Connection state unavailable. Check your network.'),
-        ...?pairs.value?.docs.map((doc) {
-          final data = doc.data();
-          final status = data['status'] as String? ?? 'unknown';
-          final verified = !doc.metadata.isFromCache;
-          final memberIds = List<String>.from(data['memberIds'] as List? ?? const []);
-          final partner = memberIds.where((id) => id != uid).firstOrNull ?? 'Unknown';
+        ...?pairs.value?.map((membership) {
+          final status = membership.status;
+          final verified = !membership.isFromCache;
+          final partner = uid == null
+              ? 'Unknown'
+              : membership.partnerOf(uid) ?? 'Unknown';
           return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(verified ? 'Status: $status' : 'Last confirmed: $status (checking connection)', style: Theme.of(context).textTheme.titleMedium),
             Text('Partner account: $partner'),
             if (verified && status == 'pending') ...[
               const Text('By choosing consent, you authorize connection. Each person controls their own sharing categories.'),
               Wrap(spacing: 8, children: [
-                TextButton(onPressed: _busy || repo == null || uid == null ? null : () => _run(() => repo.setConsent(doc.id, uid, granted: false)), child: const Text('Reject')),
-                FilledButton(onPressed: _busy || repo == null || uid == null ? null : () => _run(() => repo.setConsent(doc.id, uid, granted: true)), child: const Text('I consent')),
+                TextButton(onPressed: _busy || repo == null || uid == null ? null : () => _run(() => repo.setConsent(membership.pairId, uid, granted: false)), child: const Text('Reject')),
+                FilledButton(onPressed: _busy || repo == null || uid == null ? null : () => _run(() => repo.setConsent(membership.pairId, uid, granted: true)), child: const Text('I consent')),
               ]),
             ],
-            if (verified && status == 'active') OutlinedButton(onPressed: _busy || repo == null ? null : () => _run(() => repo.disconnect(doc.id)), child: const Text('Disconnect')),
+            if (verified && status == 'active') OutlinedButton(onPressed: _busy || repo == null ? null : () => _run(() => repo.disconnect(membership.pairId)), child: const Text('Disconnect')),
           ])));
         }),
       ]),

@@ -1112,3 +1112,274 @@ test('interpretations are immutable once created', async () => {
     }),
   );
 });
+
+// ============================ Phase 11: real-time synchronization ============
+// These assertions are the executable specification of
+// docs/security/FIRESTORE_DEVICE_STATE_SECURITY.md. They cover the properties
+// the synchronization layer relies on: ownership binding, pair isolation,
+// category gating on the *new* field set, value validation, state-version
+// ordering, revocation, and location retraction.
+
+/// A complete, well-formed device-state document as the Flutter writer sends it.
+function sharedState(ownerId, fields = {}) {
+  return {
+    ownerUserId: ownerId,
+    deviceId: 'opaque-device-id',
+    schemaVersion: 1,
+    stateVersion: 1,
+    observedAt: ts(),
+    updatedAt: serverTimestamp(),
+    availabilityState: 'available',
+    ...fields,
+  };
+}
+
+/// A complete, well-formed location document. The path itself cannot carry
+/// `latitude`/`longitude` (they are reserved words in these rules), so raw
+/// listener reads are used below where the fields must be inspected.
+function sharedLocation(ownerId, fields = {}) {
+  return {
+    ownerUserId: ownerId,
+    deviceId: 'opaque-device-id',
+    schemaVersion: 1,
+    stateVersion: 1,
+    observedAt: ts(),
+    updatedAt: serverTimestamp(),
+    ...fields,
+  };
+}
+
+test('the owner can publish their own state with the documented field set', async () => {
+  const db = as('uA');
+  await assertSucceeds(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 71,
+      networkState: 'online',
+    })),
+  );
+});
+
+test('a state write must be stamped by the server, not the client', async () => {
+  const db = as('uA');
+  // A client-chosen timestamp cannot prove when the server accepted the write.
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), {
+      ownerUserId: 'uA',
+      batteryPercentage: 71,
+      updatedAt: ts(),
+    }),
+  );
+});
+
+test('a state write may not carry fields outside the documented set', async () => {
+  const db = as('uA');
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 71,
+      rawGpsTrail: [1, 2, 3],
+    })),
+  );
+});
+
+test('a state write may not store a category the owner is not sharing', async () => {
+  // uA shares battery + network only, so an activity field must be rejected.
+  const db = as('uA');
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 71,
+      screenState: 'on',
+    })),
+  );
+});
+
+test('state values are range- and type-checked before storage', async () => {
+  const db = as('uA');
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 101,
+    })),
+  );
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 71,
+      isCharging: 'yes',
+    })),
+  );
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      networkState: 'maybe',
+    })),
+  );
+});
+
+test('a state observation may not be timestamped in the future', async () => {
+  const db = as('uA');
+  const future = Timestamp.fromDate(new Date(Date.now() + 60 * 60 * 1000));
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 71,
+      observedAt: future,
+    })),
+  );
+});
+
+test('an older snapshot cannot overwrite a newer one', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await setDoc(
+      doc(context.firestore(), 'pairs', 'p1', 'deviceState', 'uA'),
+      { ownerUserId: 'uA', stateVersion: 7, updatedAt: ts() },
+    );
+  });
+
+  const db = as('uA');
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 71,
+      stateVersion: 6,
+    })),
+  );
+});
+
+test('a state write cannot claim another user as its owner', async () => {
+  const db = as('uA');
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uB', {
+      batteryPercentage: 71,
+    })),
+  );
+});
+
+test('a member cannot publish state into an unrelated pair', async () => {
+  const db = as('uA');
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p2', 'deviceState', 'uC'), sharedState('uC', {
+      batteryPercentage: 10,
+    })),
+  );
+  // Nor into their own slot of someone else's pair.
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p2', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 10,
+    })),
+  );
+});
+
+test('a revoked pair can no longer receive state writes', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await updateDoc(doc(context.firestore(), 'pairs', 'p1'), {
+      status: 'revoked',
+    });
+  });
+
+  const db = as('uA');
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 71,
+    })),
+  );
+});
+
+test('a disconnected pair stops accepting writes from both members', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await updateDoc(doc(context.firestore(), 'pairs', 'p1'), {
+      status: 'disconnected',
+    });
+  });
+
+  await assertFails(
+    setDoc(doc(as('uB'), 'pairs', 'p1', 'deviceState', 'uB'), sharedState('uB', {
+      batteryPercentage: 41,
+    })),
+  );
+});
+
+test('a member cannot widen their own sharing through a state write', async () => {
+  // Authorization lives in the sharing document, which is keyed to its own
+  // subject; a state write can never become an authorization change.
+  const db = as('uB');
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'sharing', 'uA'), {
+      userId: 'uA',
+      pairId: 'p1',
+      paused: false,
+      categories: ['battery', 'network', 'location'],
+    }),
+  );
+});
+
+// ------------------------------------------------ location write semantics ---
+
+test('the owner can publish location once the category is shared', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await seedSharing(context.firestore(), 'p1', 'uA', ['battery', 'network', 'location']);
+  });
+
+  const db = as('uA');
+  await assertSucceeds(
+    setDoc(doc(db, 'pairs', 'p1', 'location', 'uA'), sharedLocation('uA', {
+      latitude: 52.51,
+      longitude: 13.41,
+      accuracyMeters: 18,
+      approximate: false,
+    })),
+  );
+});
+
+test('location coordinates are range-checked', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await seedSharing(context.firestore(), 'p1', 'uA', ['battery', 'network', 'location']);
+  });
+
+  const db = as('uA');
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'location', 'uA'), sharedLocation('uA', {
+      latitude: 91,
+      longitude: 13.41,
+    })),
+  );
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'location', 'uA'), sharedLocation('uA', {
+      latitude: 52.51,
+      longitude: 13.41,
+      accuracyMeters: -5,
+    })),
+  );
+});
+
+test('distance from home needs its own category, separately from coordinates', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await seedSharing(context.firestore(), 'p1', 'uA', ['battery', 'network', 'location']);
+  });
+
+  const db = as('uA');
+  // The `location` category alone does not authorize the derived distance.
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'location', 'uA'), sharedLocation('uA', {
+      latitude: 52.51,
+      longitude: 13.41,
+      distanceFromHomeKm: 0.74,
+      homePresence: 'awayFromHome',
+    })),
+  );
+});
+
+test('an unknown home presence value is rejected', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await seedSharing(context.firestore(), 'p1', 'uA', [
+      'battery',
+      'network',
+      'location',
+      'distanceFromHome',
+    ]);
+  });
+
+  const db = as('uA');
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'location', 'uA'), sharedLocation('uA', {
+      latitude: 52.51,
+      longitude: 13.41,
+      distanceFromHomeKm: 0.74,
+      homePresence: 'definitelyHome',
+    })),
+  );
+});

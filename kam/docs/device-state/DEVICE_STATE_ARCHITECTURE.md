@@ -23,7 +23,11 @@ reachability, and online/offline observations use an independent event-driven
 bridge and collector. Display state, activity signals, application lifecycle
 and evidence-based availability use a third independent collector with a
 single persisted timestamp (Phase 9, see
-[`ACTIVITY_AVAILABILITY.md`](ACTIVITY_AVAILABILITY.md)). All typed values are
+[`ACTIVITY_AVAILABILITY.md`](ACTIVITY_AVAILABILITY.md)). Foreground location,
+permission/service state, the user-configured home and distance-based presence
+use a fourth independent collector, which never auto-prompts for permission and
+keeps home coordinates out of the snapshot (Phase 10, see
+[`LOCATION_HOME_DISTANCE.md`](LOCATION_HOME_DISTANCE.md)). All typed values are
 part of the local snapshot; later phases add remaining capability collectors. The legacy dashboard model remains
 available for existing presentation consumers.
 The application continues using Riverpod and the existing legacy `DeviceState`
@@ -50,10 +54,14 @@ Firestore Security Rules for authorization.
 
 ## Efficiency and privacy
 
-There is no polling loop, high-frequency telemetry, location request, Firestore
-write, or background service. The local repository caches one snapshot and
-refreshes only when explicitly asked. Logs include capability names and error
-types, never values, user IDs, tokens, pairing codes, or precise location.
+There is no polling loop, high-frequency telemetry, background location request,
+Firestore write, or background service. Location is read once per refresh while
+the app is in the foreground and monitoring is active, and the native bridges
+throttle updates (Android 60 s/100 m, iOS `distanceFilter` 100 m). The local
+repository caches one snapshot and refreshes only when explicitly asked. Logs
+include capability names and error types, never values, user IDs, tokens, pairing
+codes, or precise location — the location collector and both native bridges log
+no coordinates at all.
 
 The app-generated opaque device ID is 128 random bits encoded as 32 lowercase
 hex characters and persisted in app-private preferences. It contains no

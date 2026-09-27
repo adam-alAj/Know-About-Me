@@ -10,6 +10,19 @@ class Coordinate {
   final double latitude;
   final double longitude;
 
+  /// Whether this is a usable WGS-84 coordinate.
+  ///
+  /// Guards against platform values that are NaN, infinite, or outside the
+  /// valid ranges, so an invalid fix is rejected instead of being plotted
+  /// somewhere plausible (Phase 10).
+  bool get isValid =>
+      latitude.isFinite &&
+      longitude.isFinite &&
+      latitude >= -90 &&
+      latitude <= 90 &&
+      longitude >= -180 &&
+      longitude <= 180;
+
   @override
   bool operator ==(Object other) =>
       other is Coordinate &&
@@ -26,11 +39,17 @@ class Coordinate {
 }
 
 /// The user's configured home location (SRS FR-022).
+///
+/// Created explicitly by the user (profile settings, owner-only) — never
+/// inferred from GPS history, frequent locations, Wi-Fi or IP address. The
+/// partner never receives these coordinates: only the derived distance and
+/// presence travel (FIRESTORE_DATA_MODEL §2, NFR-005, NFR-036).
 class HomeLocation {
   const HomeLocation({
     required this.coordinate,
     this.label,
     this.radiusKm = 0.3,
+    this.enabled = true,
   });
 
   /// Centre point of the home area.
@@ -40,19 +59,59 @@ class HomeLocation {
   final String? label;
 
   /// Radius used to classify the device as at / near home (FR-024).
+  ///
+  /// Defaults to 300 m, the value already used by the profile model.
   final double radiusKm;
 
+  /// Whether home classification is currently switched on by the user.
+  ///
+  /// A disabled home location keeps its coordinates but must not produce
+  /// at-home/away statements.
+  final bool enabled;
+
+  /// Radius in metres, so callers cannot accidentally compare km to m.
+  double get radiusMeters => radiusKm * 1000;
+
+  HomeLocation copyWith({
+    Coordinate? coordinate,
+    String? label,
+    double? radiusKm,
+    bool? enabled,
+  }) {
+    return HomeLocation(
+      coordinate: coordinate ?? this.coordinate,
+      label: label ?? this.label,
+      radiusKm: radiusKm ?? this.radiusKm,
+      enabled: enabled ?? this.enabled,
+    );
+  }
+
   @override
-  String toString() => 'HomeLocation(label: $label, radiusKm: $radiusKm)';
+  String toString() =>
+      'HomeLocation(label: $label, radiusKm: $radiusKm, enabled: $enabled)';
 }
 
 /// Basic presence classification derived from location (SRS FR-024).
+///
+/// [atHome] and [awayFromHome] are only produced from a location that is
+/// usable *now*; [unknown], [stale] and [unsupported] must never be folded
+/// into `awayFromHome` (Phase 10 §20).
 enum HomePresence {
   atHome,
+
+  /// Reserved for a future user-configured near-home band; the Phase 10
+  /// derivation classifies strictly by the configured home radius.
   nearHome,
+
   awayFromHome,
 
-  /// Location is missing, stale beyond usefulness, or permission is absent.
+  /// A location exists but is too old to classify presence with.
+  stale,
+
+  /// The platform cannot provide location at all.
+  unsupported,
+
+  /// Missing home, missing location, permission or service problems.
   unknown,
 }
 
@@ -62,6 +121,11 @@ enum HomePresence {
 /// precision is never over-claimed: [accuracyMeters] is retained and stale
 /// locations are exposed as stale via [coordinates]'s freshness (FR-020,
 /// FR-025).
+///
+/// This is the Phase 2/3 summary model used by the existing rule-engine
+/// contract. Phase 10 adds the richer normalized observation model
+/// (`DeviceLocationState` in the device-state feature) which carries
+/// permission, service and current-vs-last-known semantics explicitly.
 class LocationState {
   const LocationState({
     required this.coordinates,

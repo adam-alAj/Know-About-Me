@@ -46,6 +46,16 @@ class FreshnessPolicy {
     recentFor: Duration(hours: 2),
   );
 
+  /// Policy for location fixes (Phase 10).
+  ///
+  /// A fix a couple of minutes old is still a current position, while one
+  /// older than half an hour must not be presented as current: the at-home /
+  /// away classification becomes `stale` at that point.
+  static const FreshnessPolicy location = FreshnessPolicy(
+    freshFor: Duration(minutes: 5),
+    recentFor: Duration(minutes: 30),
+  );
+
   /// Classifies [age] according to this policy.
   DataFreshness classifyAge(Duration age) {
     if (age.isNegative) {

@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Phase 10: foreground location only. The app explains why before asking,
+	     never tracks in the background, and never requests "always" access. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Kam uses your location only while you have the app open, to show how far you are from the home location you set for yourself.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

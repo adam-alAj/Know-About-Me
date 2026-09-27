@@ -12,7 +12,6 @@ import '../../../core/ui/widgets/app_button.dart';
 import '../../../core/ui/widgets/app_card.dart';
 import '../../../core/ui/widgets/app_inline_message.dart';
 import '../../../core/ui/widgets/app_scaffold.dart';
-import '../../../core/ui/widgets/empty_view.dart';
 import '../../../core/ui/widgets/section_header.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
 import '../../device_state/domain/models/device_state.dart';
@@ -21,7 +20,9 @@ import '../../device_state/domain/models/network_state.dart';
 import '../../device_state/domain/models/device_state_snapshot.dart';
 import '../../device_state/presentation/providers/device_state_providers.dart';
 import '../../device_state/presentation/widgets/activity_summary_card.dart';
+import '../../device_state/presentation/widgets/location_summary_card.dart';
 import '../../device_state/presentation/widgets/metric_tile.dart';
+import '../../device_state/presentation/widgets/partner_sync_card.dart';
 
 /// The reassurance-oriented partner dashboard shell (SRS FR-045, FR-046).
 ///
@@ -111,6 +112,8 @@ class DashboardScreen extends ConsumerWidget {
           ),
           const SizedBox(height: AppSpacing.sm),
           const AppCard(child: ActivitySummaryCard()),
+          const SizedBox(height: AppSpacing.sm),
+          const AppCard(child: LocationSummaryCard()),
           const SizedBox(height: AppSpacing.lg),
           const SectionHeader(title: 'Connected partner'),
           AppButton.secondary(
@@ -118,16 +121,7 @@ class DashboardScreen extends ConsumerWidget {
             onPressed: () => context.pushNamed(AppRoutes.pairing),
           ),
           const SizedBox(height: AppSpacing.sm),
-          const AppCard(
-            child: SizedBox(
-              height: 200,
-              child: EmptyView(
-                icon: Icons.link_off,
-                message:
-                    'No partner device data is available yet.',
-              ),
-            ),
-          ),
+          const AppCard(child: PartnerSyncCard()),
           const SizedBox(height: AppSpacing.lg),
           Text(
             'Environment: ${config.environment.name}',
@@ -231,6 +225,7 @@ class _NetworkSummary extends StatelessWidget {
     CapabilityAvailability.unknown => 'Unknown',
     CapabilityAvailability.unsupported => 'Unsupported',
     CapabilityAvailability.permissionDenied => 'Permission not granted',
+    CapabilityAvailability.serviceDisabled => 'Service disabled',
     CapabilityAvailability.error => 'Temporarily unavailable',
     CapabilityAvailability.stale => 'Stale',
   };
@@ -287,6 +282,7 @@ class _BatterySummary extends StatelessWidget {
     return switch (observation.availability) {
       CapabilityAvailability.unsupported => 'Unsupported',
       CapabilityAvailability.permissionDenied => 'Permission not granted',
+      CapabilityAvailability.serviceDisabled => 'Service disabled',
       CapabilityAvailability.error => 'Temporarily unavailable',
       CapabilityAvailability.stale => 'Stale',
       CapabilityAvailability.unknown => 'Unknown',

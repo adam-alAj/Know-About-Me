@@ -259,6 +259,9 @@ class FirestoreProfileRepository implements ProfileRepository {
       ),
       label: label is String ? label : null,
       radiusKm: radius is num ? radius.toDouble() : 0.3,
+      // Absent on documents written before home could be disabled: an existing
+      // home stays enabled rather than silently switching off.
+      enabled: raw['enabled'] != false,
     );
   }
 
@@ -268,6 +271,7 @@ class FirestoreProfileRepository implements ProfileRepository {
       'longitude': location.coordinate.longitude,
       if (location.label != null) 'label': location.label,
       'radiusKm': location.radiusKm,
+      'enabled': location.enabled,
     };
   }
 

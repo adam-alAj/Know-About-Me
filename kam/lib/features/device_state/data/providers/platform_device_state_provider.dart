@@ -10,6 +10,7 @@ import '../../domain/sources/platform_device_state_adapter.dart';
 import '../../domain/services/activity_state_collector.dart';
 import '../../domain/services/battery_charging_collector.dart';
 import '../../domain/services/device_availability_deriver.dart';
+import '../../domain/services/location_state_collector.dart';
 import '../../domain/services/network_state_collector.dart';
 
 
@@ -25,6 +26,7 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     this.batteryCollector,
     this.networkCollector,
     this.activityCollector,
+    this.locationCollector,
   });
 
   final Future<String> Function() deviceId;
@@ -35,6 +37,7 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
   final BatteryChargingCollector? batteryCollector;
   final NetworkStateCollector? networkCollector;
   final ActivityStateCollector? activityCollector;
+  final LocationStateCollector? locationCollector;
 
   static const _deriver = DeviceAvailabilityDeriver();
 
@@ -50,6 +53,8 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     if (network != null) status.addAll(network.capabilityStatus);
     final activity = activityCollector;
     if (activity != null) status.addAll(activity.capabilityStatus);
+    final location = locationCollector;
+    if (location != null) status.addAll(location.capabilityStatus);
     return Map.unmodifiable(status);
   }
 
@@ -64,7 +69,9 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
       if ((batteryCollector != null && _batteryMetrics.contains(capability)) ||
           (networkCollector != null && _networkMetrics.contains(capability)) ||
           (activityCollector != null &&
-              _activityMetrics.contains(capability))) {
+              _activityMetrics.contains(capability)) ||
+          (locationCollector != null &&
+              _locationMetrics.contains(capability))) {
         continue;
       }
       try {
@@ -101,6 +108,12 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     final activity = activityCollector == null
         ? null
         : await activityCollector!.refresh();
+    // Location is the most expensive collector and the most sensitive one: it
+    // reads only when permission and the OS service allow it, and a failure
+    // becomes a normalized state rather than an exception.
+    final location = locationCollector == null
+        ? null
+        : await locationCollector!.refresh();
     logger.info('Device state collection completed', context: {
       'capabilityCount': observations.length,
     });
@@ -112,6 +125,7 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
       battery: battery,
       network: network,
       activity: activity,
+      location: location,
     );
     return snapshot.withAvailability(_deriveAvailability(snapshot));
   }
@@ -127,6 +141,7 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
       ...?snapshot.battery?.observations,
       ...?snapshot.network?.observations,
       ...?snapshot.activity?.observations,
+      ...?snapshot.location?.observations,
     ];
     return _deriver.derive(
       observations: observations,
@@ -142,7 +157,13 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     final collector = batteryCollector;
     final network = networkCollector;
     final activity = activityCollector;
-    if (collector == null && network == null && activity == null) return;
+    final location = locationCollector;
+    if (collector == null &&
+        network == null &&
+        activity == null &&
+        location == null) {
+      return;
+    }
 
     final updates = StreamController<DeviceStateSnapshot>();
     final subscriptions = <Future<void> Function()>[];
@@ -165,6 +186,14 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     if (activity != null) {
       final subscription = activity.watchActivityState().listen((value) {
         snapshot = snapshot.withActivity(value, observedAt: clock().toUtc());
+        snapshot = snapshot.withAvailability(_deriveAvailability(snapshot));
+        updates.add(snapshot);
+      }, onError: updates.addError);
+      subscriptions.add(subscription.cancel);
+    }
+    if (location != null) {
+      final subscription = location.watchLocationState().listen((value) {
+        snapshot = snapshot.withLocation(value, observedAt: clock().toUtc());
         snapshot = snapshot.withAvailability(_deriveAvailability(snapshot));
         updates.add(snapshot);
       }, onError: updates.addError);
@@ -200,6 +229,16 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     DeviceMetric.lastActivity,
     DeviceMetric.appLifecycle,
     DeviceMetric.deviceAvailability,
+  };
+
+  static const _locationMetrics = <DeviceMetric>{
+    DeviceMetric.location,
+    DeviceMetric.preciseLocation,
+    DeviceMetric.approximateLocation,
+    DeviceMetric.backgroundLocation,
+    DeviceMetric.homeLocation,
+    DeviceMetric.distanceFromHome,
+    DeviceMetric.homePresence,
   };
 }
 

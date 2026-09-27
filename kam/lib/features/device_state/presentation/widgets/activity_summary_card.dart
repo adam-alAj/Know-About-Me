@@ -144,6 +144,7 @@ class ActivitySummaryCard extends ConsumerWidget {
         'STALE${confirmed == null ? '' : ' (last confirmed ${_relativeTime(now.toUtc().difference(confirmed.toUtc()))})'}',
       CapabilityAvailability.unsupported => 'UNSUPPORTED',
       CapabilityAvailability.permissionDenied => 'PERMISSION NOT GRANTED',
+      CapabilityAvailability.serviceDisabled => 'SERVICE DISABLED',
       CapabilityAvailability.error => 'ERROR',
       CapabilityAvailability.unavailable => 'UNAVAILABLE',
       CapabilityAvailability.unknown => 'UNKNOWN',
@@ -157,6 +158,7 @@ class ActivitySummaryCard extends ConsumerWidget {
         CapabilityAvailability.unknown => 'Unknown',
         CapabilityAvailability.unsupported => 'Unsupported',
         CapabilityAvailability.permissionDenied => 'Permission not granted',
+        CapabilityAvailability.serviceDisabled => 'Service disabled',
         CapabilityAvailability.error => 'Temporarily unavailable',
         CapabilityAvailability.stale => 'Stale',
       };

@@ -2,6 +2,7 @@ import '../../../../core/domain/device_metric.dart';
 import 'activity_state.dart';
 import 'battery_state.dart';
 import 'device_availability_evidence.dart';
+import 'device_location_state.dart';
 import 'network_state.dart';
 import 'state_observation.dart';
 
@@ -27,6 +28,7 @@ class DeviceStateSnapshot {
     this.battery,
     this.network,
     this.activity,
+    this.location,
     this.availability,
   });
 
@@ -42,6 +44,11 @@ class DeviceStateSnapshot {
   /// activity collector is wired in.
   final ActivityState? activity;
 
+  /// Location, permission, home distance and presence observations, when the
+  /// location collector is wired in. Home coordinates are not part of this
+  /// contract — only derived values leave the device.
+  final DeviceLocationState? location;
+
   /// Evidence-based local availability derived from every observation in this
   /// snapshot plus the last observed activity signal.
   final DeviceAvailabilityEvidence? availability;
@@ -56,6 +63,7 @@ class DeviceStateSnapshot {
         battery: value,
         network: network,
         activity: activity,
+        location: location,
         availability: availability,
       );
 
@@ -69,6 +77,7 @@ class DeviceStateSnapshot {
         battery: battery,
         network: value,
         activity: activity,
+        location: location,
         availability: availability,
       );
 
@@ -82,8 +91,25 @@ class DeviceStateSnapshot {
         battery: battery,
         network: network,
         activity: value,
+        location: location,
         availability: availability,
       );
+
+  DeviceStateSnapshot withLocation(
+    DeviceLocationState value, {
+    DateTime? observedAt,
+  }) => DeviceStateSnapshot(
+    deviceId: deviceId,
+    userId: userId,
+    collectedAt: observedAt?.toUtc() ?? collectedAt,
+    reportedAt: reportedAt,
+    capabilities: capabilities,
+    battery: battery,
+    network: network,
+    activity: activity,
+    location: value,
+    availability: availability,
+  );
 
   DeviceStateSnapshot withAvailability(DeviceAvailabilityEvidence value) =>
       DeviceStateSnapshot(
@@ -95,6 +121,7 @@ class DeviceStateSnapshot {
         battery: battery,
         network: network,
         activity: activity,
+        location: location,
         availability: value,
       );
 
@@ -108,6 +135,7 @@ class DeviceStateSnapshot {
     'battery': battery?.toJson(),
     'network': network?.toJson(),
     'activity': activity?.toJson(),
+    'location': location?.toJson(),
     'availability': availability?.toJson(),
     'capabilities': {
       for (final entry in capabilities.entries) entry.key.name: entry.value.toJson(),
@@ -135,6 +163,11 @@ class DeviceStateSnapshot {
           ? null
           : ActivityState.fromJson(
               Map<String, Object?>.from(json['activity']! as Map),
+            ),
+      location: json['location'] == null
+          ? null
+          : DeviceLocationState.fromJson(
+              Map<String, Object?>.from(json['location']! as Map),
             ),
       availability: json['availability'] == null
           ? null

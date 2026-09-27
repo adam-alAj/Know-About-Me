@@ -24,24 +24,27 @@ void main() {
     expect(find.text('Unknown'), findsOneWidget);
   });
 
-  testWidgets('partner area shows an empty state rather than fake data', (
+  testWidgets('partner area states the truth rather than showing fake data', (
     tester,
   ) async {
     await pumpTestApp(tester);
 
-    // The dashboard now carries the Phase 9 activity card, so the partner
-    // section sits below the initial viewport of the ListView.
-    final partnerEmptyState = find.textContaining(
-      'No partner device data is available yet.',
+    // The dashboard now carries the Phase 9-11 cards, so the partner section
+    // sits below the initial viewport of the ListView. This build has no
+    // Firebase, so the honest statement is that nothing is synchronized at all.
+    final partnerStatus = find.textContaining(
+      'Synchronization is unavailable in this build',
     );
     await tester.scrollUntilVisible(
-      partnerEmptyState,
+      partnerStatus,
       240,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
 
-    expect(partnerEmptyState, findsOneWidget);
+    expect(partnerStatus, findsOneWidget);
+    // Without a data source, no partner values may be invented.
+    expect(find.textContaining('Partner device'), findsNothing);
   });
 
   testWidgets('navigates from the dashboard to the privacy branch', (

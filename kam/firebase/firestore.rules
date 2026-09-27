@@ -138,21 +138,163 @@ service cloud.firestore {
       return isActivePair(pairId) && notPaused(pairId, ownerId) && shares(pairId, ownerId, category);
     }
 
-    // Field-level minimisation on read: every present field must still be shared.
-    function stateFieldsStillShared(pairId, ownerId) {
-      return (!('batteryPercentage' in resource.data.keys()) || shares(pairId, ownerId, 'battery'))
-        && (!('isCharging' in resource.data.keys()) || shares(pairId, ownerId, 'charging'))
-        && (!('chargingStartedAt' in resource.data.keys()) || shares(pairId, ownerId, 'charging'))
-        && (!('chargingDurationSeconds' in resource.data.keys()) || shares(pairId, ownerId, 'charging'))
-        && (!('networkState' in resource.data.keys()) || shares(pairId, ownerId, 'network'))
-        && (!('activityState' in resource.data.keys()) || shares(pairId, ownerId, 'activityIndicators'))
-        && (!('lastActivityAt' in resource.data.keys()) || shares(pairId, ownerId, 'activityIndicators'));
+    // The exact field set a device-state document may contain (Phase 11 §37).
+    // Writing anything else is rejected, so a modified client cannot smuggle
+    // extra data into a shared document or add a field the reader would trust.
+    function deviceStateKeys() {
+      return [
+        'ownerUserId', 'deviceId', 'schemaVersion', 'stateVersion',
+        'observedAt', 'updatedAt', 'availabilityState', 'lastOnlineAt',
+        'batteryPercentage', 'isCharging', 'chargingStartedAt',
+        'chargingDurationSeconds', 'networkState', 'screenState',
+        'activityState', 'lastActivityAt'
+      ];
     }
 
-    function locationFieldsStillShared(pairId, ownerId) {
-      return (!('latitude' in resource.data.keys()) || shares(pairId, ownerId, 'location'))
-        && (!('longitude' in resource.data.keys()) || shares(pairId, ownerId, 'location'))
-        && (!('distanceFromHomeKm' in resource.data.keys()) || shares(pairId, ownerId, 'distanceFromHome'));
+    function locationKeys() {
+      return [
+        'ownerUserId', 'deviceId', 'schemaVersion', 'stateVersion',
+        'observedAt', 'updatedAt', 'latitude', 'longitude',
+        'accuracyMeters', 'approximate', 'distanceFromHomeKm', 'homePresence'
+      ];
+    }
+
+    // Availability names a capability may legitimately be reported as.
+    function availabilityNames() {
+      return [
+        'available', 'unavailable', 'unknown', 'unsupported',
+        'permissionDenied', 'serviceDisabled', 'error', 'stale'
+      ];
+    }
+
+    // An enum-ish field may carry a real value or an availability marker, so a
+    // capability the device cannot observe stays `unsupported` across
+    // synchronization instead of silently becoming `off` (Phase 11 §41).
+    function screenStateValues() {
+      return ['on', 'off', 'unknown', 'unavailable', 'unsupported',
+              'permissionDenied', 'serviceDisabled', 'error', 'stale'];
+    }
+
+    function activityStateValues() {
+      return ['activityDetected', 'noActivityObserved', 'unknown',
+              'unavailable', 'unsupported', 'permissionDenied',
+              'serviceDisabled', 'error', 'stale'];
+    }
+
+    function homePresenceValues() {
+      return ['atHome', 'nearHome', 'awayFromHome', 'stale', 'unsupported', 'unknown'];
+    }
+
+    // A device observation must be a real timestamp and may not be further in
+    // the future than normal clock skew allows (Phase 11 §37).
+    function validObservedAt() {
+      return request.resource.data.observedAt is timestamp
+        && request.resource.data.observedAt <= request.time + duration.value(5, 'm');
+    }
+
+    // The categories the owner shares right now, read once per request.
+    function sharingCategories(pairId, ownerId) {
+      return hasSharing(pairId, ownerId) ? sharing(pairId, ownerId).categories : [];
+    }
+
+    // Field-level minimisation on READ: every present field must still be shared.
+    //
+    // `keys` is passed in by the caller so the key list is built once per
+    // request instead of once per field. Firestore caps a request at 1000
+    // expression evaluations, and the naive per-field form of this check was
+    // enough to reach that cap on writes.
+    function stateFieldsStillShared(pairId, ownerId, keys) {
+      return (!keys.hasAny(['batteryPercentage']) || shares(pairId, ownerId, 'battery'))
+        && (!keys.hasAny(['isCharging', 'chargingStartedAt', 'chargingDurationSeconds'])
+            || shares(pairId, ownerId, 'charging'))
+        && (!keys.hasAny(['networkState']) || shares(pairId, ownerId, 'network'))
+        && (!keys.hasAny(['screenState', 'activityState', 'lastActivityAt'])
+            || shares(pairId, ownerId, 'activityIndicators'));
+    }
+
+    function locationFieldsStillShared(pairId, ownerId, keys) {
+      return (!keys.hasAny(['latitude', 'longitude', 'accuracyMeters', 'approximate'])
+            || shares(pairId, ownerId, 'location'))
+        && (!keys.hasAny(['distanceFromHomeKm', 'homePresence'])
+            || shares(pairId, ownerId, 'distanceFromHome'));
+    }
+
+    // Everything a device-state write must satisfy, in one place.
+    //
+    // Two independent guarantees live here: a gated field may only be present at
+    // all if its category is shared right now (so a disabled category is never
+    // stored), and every value is range- and type-checked before storage (so a
+    // reader can never be handed something it could not interpret).
+    function deviceStateWriteValid(keys, categories) {
+      return keys.hasOnly(deviceStateKeys())
+        && (!keys.hasAny(['batteryPercentage']) || 'battery' in categories)
+        && (!keys.hasAny(['isCharging', 'chargingStartedAt', 'chargingDurationSeconds'])
+            || 'charging' in categories)
+        && (!keys.hasAny(['networkState']) || 'network' in categories)
+        && (!keys.hasAny(['screenState', 'activityState', 'lastActivityAt'])
+            || 'activityIndicators' in categories)
+        && (!keys.hasAny(['batteryPercentage'])
+            || (request.resource.data.batteryPercentage is int
+                && request.resource.data.batteryPercentage >= 0
+                && request.resource.data.batteryPercentage <= 100))
+        && (!keys.hasAny(['isCharging']) || request.resource.data.isCharging is bool)
+        && (!keys.hasAny(['chargingDurationSeconds'])
+            || (request.resource.data.chargingDurationSeconds is int
+                && request.resource.data.chargingDurationSeconds >= 0))
+        && (!keys.hasAny(['chargingStartedAt'])
+            || request.resource.data.chargingStartedAt is timestamp)
+        && (!keys.hasAny(['networkState'])
+            || request.resource.data.networkState in ['online', 'offline', 'unknown'])
+        && (!keys.hasAny(['screenState'])
+            || request.resource.data.screenState in screenStateValues())
+        && (!keys.hasAny(['activityState'])
+            || request.resource.data.activityState in activityStateValues())
+        && (!keys.hasAny(['availabilityState'])
+            || request.resource.data.availabilityState in availabilityNames())
+        && (!keys.hasAny(['observedAt']) || validObservedAt())
+        && (!keys.hasAny(['lastActivityAt'])
+            || request.resource.data.lastActivityAt is timestamp)
+        && (!keys.hasAny(['lastOnlineAt'])
+            || request.resource.data.lastOnlineAt is timestamp)
+        && (!keys.hasAny(['deviceId'])
+            || (request.resource.data.deviceId is string
+                && request.resource.data.deviceId.size() <= 64))
+        && (!keys.hasAny(['schemaVersion']) || request.resource.data.schemaVersion == 1);
+    }
+
+    function locationWriteValid(keys, categories) {
+      return keys.hasOnly(locationKeys())
+        && (!keys.hasAny(['latitude', 'longitude', 'accuracyMeters', 'approximate'])
+            || 'location' in categories)
+        && (!keys.hasAny(['distanceFromHomeKm', 'homePresence'])
+            || 'distanceFromHome' in categories)
+        && (!keys.hasAny(['observedAt']) || validObservedAt())
+        && (!keys.hasAny(['latitude'])
+            || (request.resource.data.latitude is number
+                && request.resource.data.latitude >= -90
+                && request.resource.data.latitude <= 90))
+        && (!keys.hasAny(['longitude'])
+            || (request.resource.data.longitude is number
+                && request.resource.data.longitude >= -180
+                && request.resource.data.longitude <= 180))
+        && (!keys.hasAny(['accuracyMeters'])
+            || (request.resource.data.accuracyMeters is number
+                && request.resource.data.accuracyMeters >= 0))
+        && (!keys.hasAny(['approximate']) || request.resource.data.approximate is bool)
+        && (!keys.hasAny(['distanceFromHomeKm'])
+            || (request.resource.data.distanceFromHomeKm is number
+                && request.resource.data.distanceFromHomeKm >= 0))
+        && (!keys.hasAny(['homePresence'])
+            || request.resource.data.homePresence in homePresenceValues())
+        && (!keys.hasAny(['schemaVersion']) || request.resource.data.schemaVersion == 1);
+    }
+
+    // An older local snapshot must not overwrite a newer one (Phase 11 §49).
+    function versionNotRegressing() {
+      return resource == null
+        || !('stateVersion' in request.resource.data.keys())
+        || !('stateVersion' in resource.data.keys())
+        || request.resource.data.stateVersion >= resource.data.stateVersion;
     }
 
     // =====================================================================
@@ -526,18 +668,20 @@ service cloud.firestore {
       // disabled category is never stored; reads re-check so a lingering field
       // cannot become visible after sharing is switched off.
       match /deviceState/{ownerId} {
+        // One owner, one document: the path, the authenticated identity and the
+        // stored owner must all agree, so a forged `userId` (or `deviceId`,
+        // which is never authorization evidence) changes nothing.
         function ownerWritesOwnState() {
           return isSelf(ownerId)
             && isActivePair(pairId)
             && request.resource.data.ownerUserId == uid()
+            && request.resource.data.updatedAt == request.time
             && notPaused(pairId, ownerId)
-            && (!('batteryPercentage' in request.resource.data.keys()) || shares(pairId, ownerId, 'battery'))
-            && (!('isCharging' in request.resource.data.keys()) || shares(pairId, ownerId, 'charging'))
-            && (!('chargingStartedAt' in request.resource.data.keys()) || shares(pairId, ownerId, 'charging'))
-            && (!('chargingDurationSeconds' in request.resource.data.keys()) || shares(pairId, ownerId, 'charging'))
-            && (!('networkState' in request.resource.data.keys()) || shares(pairId, ownerId, 'network'))
-            && (!('activityState' in request.resource.data.keys()) || shares(pairId, ownerId, 'activityIndicators'))
-            && (!('lastActivityAt' in request.resource.data.keys()) || shares(pairId, ownerId, 'activityIndicators'));
+            && deviceStateWriteValid(
+                 request.resource.data.keys(),
+                 sharingCategories(pairId, ownerId)
+               )
+            && versionNotRegressing();
         }
 
         allow read: if isSelf(ownerId)
@@ -550,7 +694,7 @@ service cloud.firestore {
                     || shares(pairId, ownerId, 'network')
                     || shares(pairId, ownerId, 'activityIndicators')
                   )
-               && stateFieldsStillShared(pairId, ownerId)
+               && stateFieldsStillShared(pairId, ownerId, resource.data.keys())
              );
 
         allow create, update: if ownerWritesOwnState();
@@ -564,15 +708,19 @@ service cloud.firestore {
         allow read: if isSelf(ownerId)
           || (
                canReadShared(pairId, ownerId, 'location')
-               && locationFieldsStillShared(pairId, ownerId)
+               && locationFieldsStillShared(pairId, ownerId, resource.data.keys())
              );
 
         allow create, update: if isSelf(ownerId)
           && isActivePair(pairId)
           && request.resource.data.ownerUserId == uid()
+          && request.resource.data.updatedAt == request.time
           && notPaused(pairId, ownerId)
-          && shares(pairId, ownerId, 'location')
-          && (!('distanceFromHomeKm' in request.resource.data.keys()) || shares(pairId, ownerId, 'distanceFromHome'));
+          && locationWriteValid(
+               request.resource.data.keys(),
+               sharingCategories(pairId, ownerId)
+             )
+          && versionNotRegressing();
 
         allow delete: if isSelf(ownerId);
       }

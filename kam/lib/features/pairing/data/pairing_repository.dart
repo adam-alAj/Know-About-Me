@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../domain/models/pair_membership.dart';
 import '../domain/pairing_code_generator.dart';
 
 /// Spark-compatible pairing operations. Rules, not these checks, authorize writes.
@@ -112,4 +113,26 @@ class PairingRepository {
 
   Stream<QuerySnapshot<Map<String, dynamic>>> watchPairs(String uid) => _db
       .collection('pairs').where('memberIds', arrayContains: uid).snapshots();
+
+  /// The caller's own pairs, as domain models.
+  ///
+  /// The query filters on the caller's own membership, so it can only ever
+  /// return pairs the security rules already permit this user to read. Nothing
+  /// here decides authorization: it only resolves what the user already has.
+  Stream<List<PairMembership>> watchPairMemberships(String uid) => watchPairs(uid)
+      .map(
+        (snapshot) => snapshot.docs
+            .map(
+              (document) => PairMembership(
+                pairId: document.id,
+                memberIds: List<String>.from(
+                  document.data()['memberIds'] as List? ?? const <String>[],
+                ),
+                status: document.data()['status'] as String? ?? 'unknown',
+                isFromCache: document.metadata.isFromCache,
+              ),
+            )
+            .where((membership) => membership.involves(uid))
+            .toList(growable: false),
+      );
 }

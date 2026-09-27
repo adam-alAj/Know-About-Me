@@ -7,6 +7,7 @@ import 'router/app_router.dart';
 import 'theme/app_theme.dart';
 import '../features/device_state/presentation/providers/device_state_providers.dart';
 import '../features/device_state/presentation/providers/device_monitoring_lifecycle.dart';
+import '../features/device_state/presentation/providers/sync_providers.dart';
 
 /// The root widget of the application.
 ///
@@ -25,6 +26,11 @@ class KamApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Instantiated at the root so real-time synchronization lives exactly as
+    // long as the application does, and so its listeners are disposed with the
+    // app rather than with one screen. It is inert without an active pair.
+    ref.watch(deviceStateSyncCoordinatorProvider);
+
     return DeviceMonitoringLifecycle(
       controller: ref.watch(deviceMonitoringControllerProvider),
       activityCollector: ref.watch(activityStateCollectorProvider),

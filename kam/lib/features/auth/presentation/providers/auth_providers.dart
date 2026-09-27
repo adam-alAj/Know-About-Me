@@ -122,3 +122,20 @@ final userPreferencesProvider =
     FutureProvider.family<Result<UserPreferences>, String>(
       (ref, uid) => ref.watch(profileRepositoryProvider).getPreferences(uid),
     );
+
+/// The signed-in user's private preferences (notification choice, home
+/// location).
+///
+/// Resolves to [UserPreferences.defaults] when nobody is signed in or the
+/// document is absent, so a missing home location is a documented default
+/// rather than a fabricated coordinate (Phase 10 §14).
+final currentUserPreferencesProvider =
+    Provider<AsyncValue<Result<UserPreferences>>>((ref) {
+      final identity = ref.watch(currentIdentityProvider);
+      if (identity == null) {
+        return const AsyncData<Result<UserPreferences>>(
+          Success<UserPreferences>(UserPreferences.defaults),
+        );
+      }
+      return ref.watch(userPreferencesProvider(identity.uid));
+    });

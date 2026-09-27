@@ -7,8 +7,10 @@ import '../../data/sources/unavailable_device_state_source.dart';
 import '../../data/providers/platform_device_state_provider.dart';
 import '../../data/activity/method_channel_activity_gateway.dart';
 import '../../data/battery/battery_platform_gateway.dart';
+import '../../data/location/method_channel_location_gateway.dart';
 import '../../data/network/method_channel_network_gateway.dart';
 import '../../data/services/shared_preferences_activity_observation_store.dart';
+import '../../data/services/shared_preferences_location_observation_store.dart';
 import '../../data/services/shared_preferences_network_observation_store.dart';
 import '../../data/repositories/local_device_state_repository.dart';
 import '../../data/services/app_device_identity.dart';
@@ -23,8 +25,10 @@ import '../../domain/repositories/device_state_repository.dart';
 import '../../domain/sources/device_state_provider.dart';
 import '../../domain/sources/device_state_source.dart';
 import '../../domain/models/activity_state.dart';
+import '../../domain/models/device_location_state.dart';
 import '../../domain/services/activity_state_collector.dart';
 import '../../domain/services/battery_charging_collector.dart';
+import '../../domain/services/location_state_collector.dart';
 import '../../domain/services/network_state_collector.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 
@@ -114,6 +118,7 @@ final deviceStateProvider = Provider<DeviceStateProvider>((ref) {
     batteryCollector: ref.watch(batteryChargingCollectorProvider),
     networkCollector: ref.watch(networkStateCollectorProvider),
     activityCollector: ref.watch(activityStateCollectorProvider),
+    locationCollector: ref.watch(locationStateCollectorProvider),
   );
 });
 
@@ -138,6 +143,34 @@ final currentLocalActivityStateProvider = StreamProvider<ActivityState>((ref) as
   yield await collector.refresh();
   yield* collector.updates;
 });
+
+/// Location collection: permission/service status, one fix per refresh and
+/// platform-throttled updates. Home comes from the owner-only profile
+/// preferences and is never inferred from movement.
+final locationStateCollectorProvider = Provider<LocationStateCollector>((ref) {
+  final platform = ref.watch(platformInfoProvider).platform;
+  final collector = LocationStateCollector(
+    gateway: MethodChannelLocationGateway(platform.name),
+    store: SharedPreferencesLocationObservationStore(),
+    now: () => ref.read(clockProvider).nowUtc(),
+  );
+  ref.onDispose(collector.dispose);
+  // A watch here would recreate the collector on every preference change, so
+  // the home location is pushed with a listener instead.
+  ref.listen(currentUserPreferencesProvider, (_, next) {
+    collector.setHomeLocation(next.value?.valueOrNull?.homeLocation);
+  }, fireImmediately: true);
+  return collector;
+});
+
+/// Current local location observation; ownership of start/stop stays with the
+/// root monitoring lifecycle.
+final currentLocalLocationStateProvider =
+    StreamProvider<DeviceLocationState>((ref) async* {
+      final collector = ref.watch(locationStateCollectorProvider);
+      yield await collector.refresh();
+      yield* collector.updates;
+    });
 
 /// The latest local snapshot streamed by the root monitoring lifecycle, used
 /// by the debug view to surface evidence-based availability.
