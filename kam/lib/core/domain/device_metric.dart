@@ -23,6 +23,7 @@ enum DeviceMetric {
   distanceFromHome,
   homePresence,
   screenState,
+  appLifecycle,
   backgroundMonitoring,
   chargingSource,
 }

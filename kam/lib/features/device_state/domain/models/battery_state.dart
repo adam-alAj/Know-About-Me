@@ -23,6 +23,14 @@ class BatteryState {
   final StateObservation<BatteryChargingSource> chargingSource;
   final DateTime? chargingStartedAt;
 
+  /// Every component observation, used for availability derivation.
+  Iterable<StateObservation<Object?>> get observations => [
+    percentage,
+    chargingState,
+    chargingDuration,
+    chargingSource,
+  ];
+
   Map<String, Object?> toJson() => {
     'percentage': percentage.toJson(),
     'chargingState': chargingState.toJson(encodeValue: (value) => value.name),

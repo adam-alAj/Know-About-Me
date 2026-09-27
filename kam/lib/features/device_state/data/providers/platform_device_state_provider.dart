@@ -2,11 +2,14 @@ import 'dart:async';
 
 import '../../../../core/logging/app_logger.dart';
 import '../../../../core/domain/device_metric.dart';
+import '../../domain/models/device_availability_evidence.dart';
 import '../../domain/models/device_state_snapshot.dart';
 import '../../domain/repositories/device_state_repository.dart';
 import '../../domain/sources/device_state_provider.dart';
 import '../../domain/sources/platform_device_state_adapter.dart';
+import '../../domain/services/activity_state_collector.dart';
 import '../../domain/services/battery_charging_collector.dart';
+import '../../domain/services/device_availability_deriver.dart';
 import '../../domain/services/network_state_collector.dart';
 
 
@@ -21,6 +24,7 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     required this.logger,
     this.batteryCollector,
     this.networkCollector,
+    this.activityCollector,
   });
 
   final Future<String> Function() deviceId;
@@ -30,6 +34,9 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
   final AppLogger logger;
   final BatteryChargingCollector? batteryCollector;
   final NetworkStateCollector? networkCollector;
+  final ActivityStateCollector? activityCollector;
+
+  static const _deriver = DeviceAvailabilityDeriver();
 
   @override
   Map<DeviceMetric, DeviceCapabilityStatus> getCapabilityStatus() {
@@ -41,6 +48,8 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     if (battery != null) status.addAll(battery.capabilityStatus);
     final network = networkCollector;
     if (network != null) status.addAll(network.capabilityStatus);
+    final activity = activityCollector;
+    if (activity != null) status.addAll(activity.capabilityStatus);
     return Map.unmodifiable(status);
   }
 
@@ -53,7 +62,9 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
       // Without a battery collector, retain Phase 6's generic adapter path so
       // existing platforms and test adapters can still supply those metrics.
       if ((batteryCollector != null && _batteryMetrics.contains(capability)) ||
-          (networkCollector != null && _networkMetrics.contains(capability))) {
+          (networkCollector != null && _networkMetrics.contains(capability)) ||
+          (activityCollector != null &&
+              _activityMetrics.contains(capability))) {
         continue;
       }
       try {
@@ -85,16 +96,42 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     final network = networkCollector == null
         ? null
         : await networkCollector!.refresh();
+    // Activity collection fails independently: a display-read failure still
+    // yields an ActivityState with an error observation, never an exception.
+    final activity = activityCollector == null
+        ? null
+        : await activityCollector!.refresh();
     logger.info('Device state collection completed', context: {
       'capabilityCount': observations.length,
     });
-    return DeviceStateSnapshot(
+    final snapshot = DeviceStateSnapshot(
       deviceId: await deviceId(),
       userId: userId(),
       collectedAt: collectedAt,
       capabilities: Map.unmodifiable(observations),
       battery: battery,
       network: network,
+      activity: activity,
+    );
+    return snapshot.withAvailability(_deriveAvailability(snapshot));
+  }
+
+  /// Conservative local availability: evidence from every observation in the
+  /// snapshot plus the last observed activity signal. Never a power-state
+  /// claim; see `docs/device-state/ACTIVITY_AVAILABILITY.md`.
+  DeviceAvailabilityEvidence _deriveAvailability(
+    DeviceStateSnapshot snapshot,
+  ) {
+    final observations = <StateObservation<Object?>>[
+      ...snapshot.capabilities.values,
+      ...?snapshot.battery?.observations,
+      ...?snapshot.network?.observations,
+      ...?snapshot.activity?.observations,
+    ];
+    return _deriver.derive(
+      observations: observations,
+      lastObservedActivityAt: snapshot.activity?.lastObservedActivityAt,
+      now: clock().toUtc(),
     );
   }
 
@@ -104,13 +141,15 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     yield snapshot;
     final collector = batteryCollector;
     final network = networkCollector;
-    if (collector == null && network == null) return;
+    final activity = activityCollector;
+    if (collector == null && network == null && activity == null) return;
 
     final updates = StreamController<DeviceStateSnapshot>();
     final subscriptions = <Future<void> Function()>[];
     if (collector != null) {
       final subscription = collector.watchBatteryState().listen((battery) {
         snapshot = snapshot.withBattery(battery, observedAt: clock().toUtc());
+        snapshot = snapshot.withAvailability(_deriveAvailability(snapshot));
         updates.add(snapshot);
       }, onError: updates.addError);
       subscriptions.add(subscription.cancel);
@@ -118,6 +157,15 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     if (network != null) {
       final subscription = network.watchNetworkState().listen((value) {
         snapshot = snapshot.withNetwork(value, observedAt: clock().toUtc());
+        snapshot = snapshot.withAvailability(_deriveAvailability(snapshot));
+        updates.add(snapshot);
+      }, onError: updates.addError);
+      subscriptions.add(subscription.cancel);
+    }
+    if (activity != null) {
+      final subscription = activity.watchActivityState().listen((value) {
+        snapshot = snapshot.withActivity(value, observedAt: clock().toUtc());
+        snapshot = snapshot.withAvailability(_deriveAvailability(snapshot));
         updates.add(snapshot);
       }, onError: updates.addError);
       subscriptions.add(subscription.cancel);
@@ -144,6 +192,14 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     DeviceMetric.networkConnectivity,
     DeviceMetric.internetReachability,
     DeviceMetric.offlineDuration,
+  };
+
+  static const _activityMetrics = <DeviceMetric>{
+    DeviceMetric.screenState,
+    DeviceMetric.activityState,
+    DeviceMetric.lastActivity,
+    DeviceMetric.appLifecycle,
+    DeviceMetric.deviceAvailability,
   };
 }
 

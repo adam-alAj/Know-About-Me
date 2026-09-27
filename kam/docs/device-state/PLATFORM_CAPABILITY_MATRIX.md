@@ -1,9 +1,12 @@
 # Platform Capability Matrix
 
 Phase 6 supplied the adapter boundary; Phases 7 and 8 add native battery,
-charging, and network collection. Other runtime capabilities remain unsupported
-until their phase adds a collector. The matrix distinguishes OS support from the
-implementation currently present in this project.
+charging, and network collection; Phase 9 adds display-state, activity-signal
+and evidence-based availability observation. Other runtime capabilities remain
+unsupported until their phase adds a collector. The matrix distinguishes OS
+support from the implementation currently present in this project. Detailed
+Phase 9 semantics live in
+[`ACTIVITY_AVAILABILITY.md`](ACTIVITY_AVAILABILITY.md).
 
 | Capability | Android | iOS | Permission | Background support | Implementation status / limitation |
 |---|---|---|---|---|---|
@@ -13,8 +16,11 @@ implementation currently present in this project.
 | Internet reachability | System `NET_CAPABILITY_VALIDATED` evidence | Not directly validated by `NWPathMonitor` | Same as transport | May become stale | Android validated/unvalidated; iOS remains unknown for a satisfied path |
 | Online / offline | Validated default route is online | Satisfied path is online | Same as transport | App can be suspended or terminated | Does not mean Firebase reachable, person active, or device powered on |
 | Offline duration | Observed online-to-offline transition | Observed satisfied-to-unsatisfied transition | None | Resets across lifecycle gaps | Unknown unless start observed in active monitoring session |
-| Screen state | Limited receiver/usage APIs | No general screen-state API | Android special usage access for some signals | Restricted | Deferred; do not claim parity or continuous state |
-| Activity | Own app lifecycle | Own app lifecycle | None for own-app lifecycle | Restricted | Device activity classification deferred to Phase 9 |
+| Screen state | `PowerManager.isInteractive` (no permission) + `ACTION_SCREEN_ON/OFF` to registered receivers | **No public API** — must stay `unsupported` | None | Android: only while the process is alive; cannot wake a terminated app | Implemented in Phase 9 (Android only); iOS never approximated |
+| Activity signals | Screen transitions + own app lifecycle | Own app lifecycle only | None | Restricted — process must be alive; monitoring stops when backgrounded | Implemented in Phase 9; signal status only, no behaviour interpretation |
+| Last observed activity | Observed screen/lifecycle transitions | Observed lifecycle transitions | None | Restored history keeps its time and ages to stale | Phase 9; never fabricated by refresh, restart or restore |
+| App lifecycle | Flutter `WidgetsBindingObserver` | Flutter `WidgetsBindingObserver` | None | App-level only; not device usage | Implemented in Phase 9; kept separate from screen state |
+| Device availability | Derived from local evidence (observations + last observed activity) | Derived from local evidence | None | Local only; no heartbeat | Phase 9; `available`/`stale`/`unknown`/`unsupported`/`error`, never power state |
 | Location | Foreground/background APIs | When-in-use/always APIs | Location permission | Limited/opportunistic | Deferred to Phase 10; no permission added/requested |
 | Background monitoring | WorkManager is deferred and opportunistic | BGTaskScheduler is deferred and opportunistic | No general permission | Restricted by OS | No scheduler or 24/7 promise |
 

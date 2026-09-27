@@ -12,6 +12,7 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -22,7 +23,10 @@ class MainActivity : FlutterActivity() {
     private val eventChannelName = "kam/device_battery/events"
     private val networkMethodChannelName = "kam/device_network"
     private val networkEventChannelName = "kam/device_network/events"
+    private val activityMethodChannelName = "kam/device_activity"
+    private val activityEventChannelName = "kam/device_activity/events"
     private var batteryReceiver: BroadcastReceiver? = null
+    private var screenReceiver: BroadcastReceiver? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -124,10 +128,62 @@ class MainActivity : FlutterActivity() {
                     stopNetworkCallback()
                 }
             })
+
+        // Phase 9: display-state observation. ACTION_SCREEN_ON/OFF are only
+        // delivered to dynamically registered receivers while this process is
+        // alive; they can never wake a terminated app, so no background
+        // monitoring is claimed. No permission is required: isInteractive is a
+        // plain getter and screen broadcasts need no grant to receive.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, activityMethodChannelName)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "getCurrentActivityState") {
+                    result.success(readActivityState())
+                } else {
+                    result.notImplemented()
+                }
+            }
+
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, activityEventChannelName)
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+                    val receiver = object : BroadcastReceiver() {
+                        override fun onReceive(context: Context?, intent: Intent?) {
+                            when (intent?.action) {
+                                Intent.ACTION_SCREEN_ON, Intent.ACTION_SCREEN_OFF ->
+                                    events.success(readActivityState())
+                            }
+                        }
+                    }
+                    screenReceiver = receiver
+                    val filter = IntentFilter().apply {
+                        addAction(Intent.ACTION_SCREEN_ON)
+                        addAction(Intent.ACTION_SCREEN_OFF)
+                    }
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            registerReceiver(receiver, filter)
+                        }
+                    } catch (error: RuntimeException) {
+                        screenReceiver = null
+                        events.error("screen_monitor_unavailable", error.javaClass.simpleName, null)
+                        return
+                    }
+                    // Start from a real reading, never from an assumed state.
+                    events.success(readActivityState())
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    unregisterScreenReceiver()
+                }
+            })
     }
 
     override fun onDestroy() {
         stopNetworkCallback()
+        unregisterScreenReceiver()
         batteryReceiver?.let { receiver ->
             try {
                 unregisterReceiver(receiver)
@@ -137,6 +193,33 @@ class MainActivity : FlutterActivity() {
         }
         batteryReceiver = null
         super.onDestroy()
+    }
+
+    private fun unregisterScreenReceiver() {
+        screenReceiver?.let { receiver ->
+            try {
+                unregisterReceiver(receiver)
+            } catch (_: IllegalArgumentException) {
+                // The stream or activity may already have released it.
+            }
+        }
+        screenReceiver = null
+    }
+
+    private fun readActivityState(): Map<String, Any?> {
+        return try {
+            val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+            mapOf(
+                "screenState" to if (power.isInteractive) "on" else "off",
+                "screenStateSupported" to true,
+            )
+        } catch (error: RuntimeException) {
+            // Report no value rather than guessing the display state.
+            mapOf(
+                "screenState" to null,
+                "screenStateSupported" to true,
+            )
+        }
     }
 
     private fun stopNetworkCallback() {

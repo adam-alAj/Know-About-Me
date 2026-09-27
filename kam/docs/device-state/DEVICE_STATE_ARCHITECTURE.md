@@ -20,8 +20,11 @@ The Android/iOS boundary is `PlatformDeviceStateAdapter`; capability reads are
 isolated so one failure cannot discard other readings. Battery and charging use
 a dedicated event-driven native bridge and collector. Network transport,
 reachability, and online/offline observations use an independent event-driven
-bridge and collector. Both typed values are part of the local snapshot; later
-phases add remaining capability collectors. The legacy dashboard model remains
+bridge and collector. Display state, activity signals, application lifecycle
+and evidence-based availability use a third independent collector with a
+single persisted timestamp (Phase 9, see
+[`ACTIVITY_AVAILABILITY.md`](ACTIVITY_AVAILABILITY.md)). All typed values are
+part of the local snapshot; later phases add remaining capability collectors. The legacy dashboard model remains
 available for existing presentation consumers.
 The application continues using Riverpod and the existing legacy `DeviceState`
 model for current presentation consumers.
@@ -29,7 +32,10 @@ model for current presentation consumers.
 `DeviceStateProvider` supports one-shot collection and a best-effort stream.
 `DeviceMonitoringController` exposes start, stop, and collect-now commands.
 `DeviceMonitoringLifecycle` starts observation at launch/resume and stops it
-when Flutter reports inactive, paused, or detached. No periodic scheduler or
+when Flutter reports inactive, paused, or detached. It also pushes each
+lifecycle transition into the activity collector, where an observed
+transition is a supported signal while an initial report only establishes the
+current phase. No periodic scheduler or
 terminated-app execution is promised.
 
 ## Local and partner data

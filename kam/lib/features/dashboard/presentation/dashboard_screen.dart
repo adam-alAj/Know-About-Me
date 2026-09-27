@@ -20,6 +20,7 @@ import '../../device_state/domain/models/battery_state.dart';
 import '../../device_state/domain/models/network_state.dart';
 import '../../device_state/domain/models/device_state_snapshot.dart';
 import '../../device_state/presentation/providers/device_state_providers.dart';
+import '../../device_state/presentation/widgets/activity_summary_card.dart';
 import '../../device_state/presentation/widgets/metric_tile.dart';
 
 /// The reassurance-oriented partner dashboard shell (SRS FR-045, FR-046).
@@ -108,6 +109,8 @@ class DashboardScreen extends ConsumerWidget {
               error: (_, _) => const Text('Network state temporarily unavailable.'),
             ),
           ),
+          const SizedBox(height: AppSpacing.sm),
+          const AppCard(child: ActivitySummaryCard()),
           const SizedBox(height: AppSpacing.lg),
           const SectionHeader(title: 'Connected partner'),
           AppButton.secondary(

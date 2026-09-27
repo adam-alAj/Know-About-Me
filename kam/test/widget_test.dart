@@ -29,10 +29,19 @@ void main() {
   ) async {
     await pumpTestApp(tester);
 
-    expect(
-      find.textContaining('No partner device data is available yet.'),
-      findsOneWidget,
+    // The dashboard now carries the Phase 9 activity card, so the partner
+    // section sits below the initial viewport of the ListView.
+    final partnerEmptyState = find.textContaining(
+      'No partner device data is available yet.',
     );
+    await tester.scrollUntilVisible(
+      partnerEmptyState,
+      240,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(partnerEmptyState, findsOneWidget);
   });
 
   testWidgets('navigates from the dashboard to the privacy branch', (

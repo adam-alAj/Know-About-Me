@@ -28,6 +28,14 @@ class NetworkState {
   final DateTime? offlineStartedAt;
   final StateObservation<Duration> offlineDuration;
 
+  /// Every component observation, used for availability derivation.
+  Iterable<StateObservation<Object?>> get observations => [
+    connectivity,
+    internet,
+    status,
+    offlineDuration,
+  ];
+
   DataFreshness freshnessAt(DateTime now) => status.freshnessAt(now);
 
   Map<String, Object?> toJson() => {

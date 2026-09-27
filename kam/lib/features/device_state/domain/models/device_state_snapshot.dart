@@ -1,5 +1,7 @@
 import '../../../../core/domain/device_metric.dart';
+import 'activity_state.dart';
 import 'battery_state.dart';
+import 'device_availability_evidence.dart';
 import 'network_state.dart';
 import 'state_observation.dart';
 
@@ -24,6 +26,8 @@ class DeviceStateSnapshot {
     this.reportedAt,
     this.battery,
     this.network,
+    this.activity,
+    this.availability,
   });
 
   final String deviceId;
@@ -34,6 +38,14 @@ class DeviceStateSnapshot {
   final BatteryState? battery;
   final NetworkState? network;
 
+  /// Activity observations (display, signal status, app lifecycle), when the
+  /// activity collector is wired in.
+  final ActivityState? activity;
+
+  /// Evidence-based local availability derived from every observation in this
+  /// snapshot plus the last observed activity signal.
+  final DeviceAvailabilityEvidence? availability;
+
   DeviceStateSnapshot withBattery(BatteryState value, {DateTime? observedAt}) =>
       DeviceStateSnapshot(
         deviceId: deviceId,
@@ -43,6 +55,8 @@ class DeviceStateSnapshot {
         capabilities: capabilities,
         battery: value,
         network: network,
+        activity: activity,
+        availability: availability,
       );
 
   DeviceStateSnapshot withNetwork(NetworkState value, {DateTime? observedAt}) =>
@@ -54,6 +68,34 @@ class DeviceStateSnapshot {
         capabilities: capabilities,
         battery: battery,
         network: value,
+        activity: activity,
+        availability: availability,
+      );
+
+  DeviceStateSnapshot withActivity(ActivityState value, {DateTime? observedAt}) =>
+      DeviceStateSnapshot(
+        deviceId: deviceId,
+        userId: userId,
+        collectedAt: observedAt?.toUtc() ?? collectedAt,
+        reportedAt: reportedAt,
+        capabilities: capabilities,
+        battery: battery,
+        network: network,
+        activity: value,
+        availability: availability,
+      );
+
+  DeviceStateSnapshot withAvailability(DeviceAvailabilityEvidence value) =>
+      DeviceStateSnapshot(
+        deviceId: deviceId,
+        userId: userId,
+        collectedAt: collectedAt,
+        reportedAt: reportedAt,
+        capabilities: capabilities,
+        battery: battery,
+        network: network,
+        activity: activity,
+        availability: value,
       );
 
   StateObservation<Object?>? operator [](DeviceMetric capability) => capabilities[capability];
@@ -65,6 +107,8 @@ class DeviceStateSnapshot {
     'reportedAt': reportedAt?.toUtc().toIso8601String(),
     'battery': battery?.toJson(),
     'network': network?.toJson(),
+    'activity': activity?.toJson(),
+    'availability': availability?.toJson(),
     'capabilities': {
       for (final entry in capabilities.entries) entry.key.name: entry.value.toJson(),
     },
@@ -86,6 +130,16 @@ class DeviceStateSnapshot {
           ? null
           : NetworkState.fromJson(
               Map<String, Object?>.from(json['network']! as Map),
+            ),
+      activity: json['activity'] == null
+          ? null
+          : ActivityState.fromJson(
+              Map<String, Object?>.from(json['activity']! as Map),
+            ),
+      availability: json['availability'] == null
+          ? null
+          : DeviceAvailabilityEvidence.fromJson(
+              Map<String, Object?>.from(json['availability']! as Map),
             ),
       capabilities: {
         for (final entry in raw.entries)

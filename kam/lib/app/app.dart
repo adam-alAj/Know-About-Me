@@ -27,6 +27,7 @@ class KamApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return DeviceMonitoringLifecycle(
       controller: ref.watch(deviceMonitoringControllerProvider),
+      activityCollector: ref.watch(activityStateCollectorProvider),
       child: MaterialApp.router(
         title: 'Know About Me',
         debugShowCheckedModeBanner: false,

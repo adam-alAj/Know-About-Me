@@ -5,8 +5,10 @@ import '../../../../core/domain/device_metric.dart';
 import '../../../../core/result/result.dart';
 import '../../data/sources/unavailable_device_state_source.dart';
 import '../../data/providers/platform_device_state_provider.dart';
+import '../../data/activity/method_channel_activity_gateway.dart';
 import '../../data/battery/battery_platform_gateway.dart';
 import '../../data/network/method_channel_network_gateway.dart';
+import '../../data/services/shared_preferences_activity_observation_store.dart';
 import '../../data/services/shared_preferences_network_observation_store.dart';
 import '../../data/repositories/local_device_state_repository.dart';
 import '../../data/services/app_device_identity.dart';
@@ -20,6 +22,8 @@ import '../../domain/models/network_state.dart';
 import '../../domain/repositories/device_state_repository.dart';
 import '../../domain/sources/device_state_provider.dart';
 import '../../domain/sources/device_state_source.dart';
+import '../../domain/models/activity_state.dart';
+import '../../domain/services/activity_state_collector.dart';
 import '../../domain/services/battery_charging_collector.dart';
 import '../../domain/services/network_state_collector.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
@@ -109,8 +113,37 @@ final deviceStateProvider = Provider<DeviceStateProvider>((ref) {
     logger: ref.watch(loggerProvider),
     batteryCollector: ref.watch(batteryChargingCollectorProvider),
     networkCollector: ref.watch(networkStateCollectorProvider),
+    activityCollector: ref.watch(activityStateCollectorProvider),
   );
 });
+
+final activityStateCollectorProvider = Provider<ActivityStateCollector>((ref) {
+  final platform = ref.watch(platformInfoProvider).platform;
+  final collector = ActivityStateCollector(
+    gateway: MethodChannelActivityGateway(platform.name),
+    store: SharedPreferencesActivityObservationStore(),
+    now: () => ref.read(clockProvider).nowUtc(),
+  );
+  ref.onDispose(collector.dispose);
+  return collector;
+});
+
+/// Current local activity observation; app lifecycle reports are pushed into
+/// the collector by the root `DeviceMonitoringLifecycle`. It never probes
+/// Firebase and never fabricates an activity timestamp.
+final currentLocalActivityStateProvider = StreamProvider<ActivityState>((ref) async* {
+  final collector = ref.watch(activityStateCollectorProvider);
+  // The root DeviceMonitoringLifecycle owns start/stop. This provider observes
+  // its events without creating a second monitoring lifecycle.
+  yield await collector.refresh();
+  yield* collector.updates;
+});
+
+/// The latest local snapshot streamed by the root monitoring lifecycle, used
+/// by the debug view to surface evidence-based availability.
+final monitoredDeviceStateProvider = StreamProvider<DeviceStateSnapshot>(
+  (ref) => ref.watch(deviceMonitoringControllerProvider).snapshots,
+);
 
 final localDeviceStateRepositoryProvider = Provider<DeviceStateRepository>(
   (ref) => LocalDeviceStateRepository(ref.watch(deviceStateProvider)),
