@@ -1,20 +1,21 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
-import '../../firebase_options.dart';
 import '../config/app_config.dart';
 import '../error/app_failure.dart';
 import '../logging/app_logger.dart';
 import 'firebase_emulators.dart';
+import 'firebase_options.dart';
 import 'firebase_error_mapper.dart';
+import 'firebase_config.dart';
 
 /// Boundary between the application and Firebase.
 ///
 /// ## Behaviour
 ///
-/// - Firebase is initialized from the generated FlutterFire options for the
-///   current platform. An initialization failure is retained and the
-///   application continues with explicit non-available states.
+/// - An explicitly supplied client configuration wins. The production entry
+///   point may opt into generated FlutterFire options; testable initialization
+///   remains offline unless configured.
 /// - Initialization happens exactly once, from `AppBootstrap`, never from a
 ///   widget or feature.
 /// - A failure is classified into an [AppFailure], retained in [lastFailure] for
@@ -41,14 +42,34 @@ abstract final class FirebaseBootstrap {
   /// Returns `true` only when the SDK actually initialized.
   static Future<bool> initialize(
     AppConfig config, {
+    bool useGeneratedOptions = false,
     AppLogger logger = const DeveloperAppLogger(),
   }) async {
     _lastFailure = null;
 
+    if (config.hasPartialFirebaseConfiguration) {
+      logger.warning(
+        'Firebase configuration is incomplete; continuing without Firebase.',
+        context: {'environment': config.environment.name},
+      );
+      _initialized = false;
+      return false;
+    }
+
+    if (!config.hasFirebaseConfiguration && !useGeneratedOptions) {
+      logger.info(
+        'Firebase is not configured for this build; continuing offline.',
+      );
+      _initialized = false;
+      return false;
+    }
+
     try {
       if (Firebase.apps.isEmpty) {
         await Firebase.initializeApp(
-          options: DefaultFirebaseOptions.currentPlatform,
+          options: config.hasFirebaseConfiguration
+              ? FirebaseConfig.optionsFor(config)
+              : DefaultFirebaseOptions.currentPlatform,
         );
       }
 

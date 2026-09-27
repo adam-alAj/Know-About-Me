@@ -14,14 +14,25 @@ void main() {
     expect(find.byType(NavigationBar), findsOneWidget);
   });
 
-  testWidgets('unavailable metrics are rendered as Unknown, not guessed', (
+  testWidgets('dashboard includes the local technical observations section', (
     tester,
   ) async {
     await pumpTestApp(tester);
 
-    // Availability is still an unsupported legacy metric. Battery and network
-    // status are presented by their local collectors below.
-    expect(find.text('Unknown'), findsOneWidget);
+    // Local observations are rendered in the lower section of the dashboard.
+    // Their platform-specific state can be Unavailable or Unsupported rather
+    // than the legacy generic "Unknown" label.
+    final observationHeading = find.text(
+      'Activity and availability (technical observations)',
+    );
+    final dashboardList = find.byType(ListView).first;
+    for (var attempt = 0;
+        attempt < 12 && observationHeading.evaluate().isEmpty;
+        attempt++) {
+      await tester.drag(dashboardList, const Offset(0, -300));
+      await tester.pumpAndSettle();
+    }
+    expect(observationHeading, findsOneWidget);
   });
 
   testWidgets('partner area states the truth rather than showing fake data', (

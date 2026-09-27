@@ -9,7 +9,7 @@
         }
       },
       "dart": {
-        "lib/firebase_options.dart": {
+        "lib/core/firebase/firebase_options.dart": {
           "projectId": "gendersocialapp",
           "configurations": {
             "android": "1:440239930081:android:499771be9c9d2d683655a0",

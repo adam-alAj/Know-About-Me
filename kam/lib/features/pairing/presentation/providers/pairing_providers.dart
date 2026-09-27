@@ -47,3 +47,16 @@ final partnerScopeProvider = Provider<AsyncValue<PartnerScope?>>((ref) {
     return null;
   });
 });
+
+/// The partner-visible display name, read only from this pair's member record.
+final partnerDisplayNameProvider = StreamProvider<String?>((ref) {
+  final scope = ref.watch(partnerScopeProvider).value;
+  final repository = ref.watch(pairingRepositoryProvider);
+  if (scope == null || repository == null) {
+    return Stream<String?>.value(null);
+  }
+  return repository.watchPartnerDisplayName(
+    pairId: scope.pairId,
+    partnerUserId: scope.partnerUserId,
+  );
+});

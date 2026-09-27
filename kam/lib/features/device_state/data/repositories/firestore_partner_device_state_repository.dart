@@ -30,11 +30,11 @@ class FirestorePartnerDeviceStateRepository
   final RemoteDeviceStateParser parser;
 
   @override
-  Stream<PartnerDeviceState> watch({
+  Stream<PartnerDeviceState?> watch({
     required String pairId,
     required String partnerUserId,
   }) {
-    final controller = StreamController<PartnerDeviceState>();
+    final controller = StreamController<PartnerDeviceState?>();
     final subscriptions = <StreamSubscription<RemoteStateDocument>>[];
 
     RemoteStateDocument? deviceStateDocument;
@@ -83,7 +83,9 @@ class FirestorePartnerDeviceStateRepository
         merged = null;
       }
 
-      if (merged != null) controller.add(PartnerDeviceState(merged));
+      controller.add(
+        merged == null ? null : PartnerDeviceState(merged),
+      );
     }
 
     void maybeEmit() {

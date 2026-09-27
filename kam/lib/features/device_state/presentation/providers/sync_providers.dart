@@ -69,6 +69,20 @@ final ownSharingProvider = StreamProvider<PairSharingState>((ref) {
   return repository.watch(pairId: scope.pairId, userId: uid);
 });
 
+/// The active partner's live sharing switches. A missing or unreadable record
+/// fails closed, so a category is never shown while its authorization is unknown.
+final partnerSharingProvider = StreamProvider<PairSharingState>((ref) {
+  final scope = ref.watch(partnerScopeProvider).value;
+  final repository = ref.watch(sharingRepositoryProvider);
+  if (scope == null || repository == null) {
+    return Stream<PairSharingState>.value(PairSharingState.none);
+  }
+  return repository.watch(
+    pairId: scope.pairId,
+    userId: scope.partnerUserId,
+  );
+});
+
 /// Reads the authorized partner's synchronized state.
 final partnerDeviceStateRepositoryProvider =
     Provider<PartnerDeviceStateRepository?>((ref) {

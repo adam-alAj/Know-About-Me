@@ -9,12 +9,13 @@ import '../models/remote_device_state.dart';
 abstract interface class PartnerDeviceStateRepository {
   /// Watches the partner's state for one active pair.
   ///
-  /// Emits as soon as any part of the partner state is known, then on every
+  /// Emits `null` after both initial documents are confirmed absent, otherwise
+  /// emits as soon as any part of the partner state is known and on every
   /// change of either the state document or the location document. Callers must
   /// dispose the subscription when the pair ends, the user signs out, or the
   /// account changes — one active listener per authorized partner
   /// (Phase 11 §20, §21).
-  Stream<PartnerDeviceState> watch({
+  Stream<PartnerDeviceState?> watch({
     required String pairId,
     required String partnerUserId,
   });

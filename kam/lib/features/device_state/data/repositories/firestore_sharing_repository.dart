@@ -26,6 +26,7 @@ class FirestoreSharingRepository implements SharingRepository {
       return PairSharingState(
         paused: data['paused'] == true,
         categories: _categories(data['categories']),
+        isFromCache: snapshot.metadata.isFromCache,
       );
     }).handleError((Object _) {
       // An unreadable sharing document is not an error the user can act on, and

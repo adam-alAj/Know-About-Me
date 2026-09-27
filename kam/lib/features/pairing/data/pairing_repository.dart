@@ -84,7 +84,27 @@ class PairingRepository {
       });
       return;
     }
+    try {
+      await _syncOwnPairProfile(pairId, uid);
+    } on FirebaseException {
+      // Profile display is optional. A copy failure must not undo or obscure a
+      // consent decision that Firestore has already recorded.
+    }
     await _activateIfConsented(pairId);
+  }
+
+  /// Copies only the user's partner-approved display name into the pair-scoped
+  /// member record. The partner never receives access to `users/{uid}`.
+  Future<void> _syncOwnPairProfile(String pairId, String uid) async {
+    final profile = await _db.collection('users').doc(uid).get();
+    final displayName = profile.data()?['displayName'];
+    if (displayName is! String || displayName.trim().isEmpty) return;
+    await _db
+        .collection('pairs')
+        .doc(pairId)
+        .collection('members')
+        .doc(uid)
+        .set({'displayName': displayName.trim()}, SetOptions(merge: true));
   }
 
   Future<void> _activateIfConsented(String pairId) async {
@@ -113,6 +133,22 @@ class PairingRepository {
 
   Stream<QuerySnapshot<Map<String, dynamic>>> watchPairs(String uid) => _db
       .collection('pairs').where('memberIds', arrayContains: uid).snapshots();
+
+  /// Watches only the partner-visible profile stored inside this pair.
+  /// Private `users/{uid}` profiles are never queried for another user.
+  Stream<String?> watchPartnerDisplayName({
+    required String pairId,
+    required String partnerUserId,
+  }) => _db
+      .collection('pairs')
+      .doc(pairId)
+      .collection('members')
+      .doc(partnerUserId)
+      .snapshots()
+      .map((snapshot) {
+        final name = snapshot.data()?['displayName'];
+        return name is String && name.trim().isNotEmpty ? name.trim() : null;
+      });
 
   /// The caller's own pairs, as domain models.
   ///

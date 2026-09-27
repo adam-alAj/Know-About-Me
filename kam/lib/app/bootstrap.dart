@@ -27,6 +27,7 @@ abstract final class AppBootstrap {
   ///
   /// Does **not** start any widget tree.
   static Future<AppConfig> initialize({
+    bool useGeneratedFirebaseOptions = false,
     AppLogger logger = const DeveloperAppLogger(),
   }) async {
     WidgetsFlutterBinding.ensureInitialized();
@@ -40,6 +41,7 @@ abstract final class AppBootstrap {
     // Firebase is initialized here and only here (never from a widget).
     final firebaseReady = await FirebaseBootstrap.initialize(
       config,
+      useGeneratedOptions: useGeneratedFirebaseOptions,
       logger: logger,
     );
     if (!firebaseReady) {
@@ -63,7 +65,7 @@ abstract final class AppBootstrap {
 
   /// Initializes the application and runs the root widget.
   static Future<void> run() async {
-    final config = await initialize();
+    final config = await initialize(useGeneratedFirebaseOptions: true);
 
     // Compose-time guard: show a calm fallback if a widget fails to build.
     if (!kIsWeb) AppErrorBoundary.install();

@@ -13,6 +13,7 @@ class PairSharingState {
   const PairSharingState({
     required this.paused,
     required this.categories,
+    this.isFromCache = false,
   });
 
   /// Nothing has been configured yet: share nothing.
@@ -28,6 +29,10 @@ class PairSharingState {
   final bool paused;
 
   final Set<SharingCategory> categories;
+
+  /// A cached sharing record is the last known setting, not proof of current
+  /// authorization while this device is offline.
+  final bool isFromCache;
 
   /// Whether [category] may currently be transmitted.
   bool shares(SharingCategory category) =>

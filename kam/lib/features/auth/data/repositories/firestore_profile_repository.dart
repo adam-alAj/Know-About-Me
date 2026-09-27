@@ -129,7 +129,52 @@ class FirestoreProfileRepository implements ProfileRepository {
       return Failure<AppUser>(_classify('updateProfile', error, stackTrace));
     }
 
+    // Keep the minimal, partner-approved profile copy current in existing
+    // pair records. A failure here must not turn a successful private profile
+    // update into an apparent failure; the dashboard can still use its generic
+    // partner label until the copy is available.
+    try {
+      await _syncPairMemberProfiles(
+        uid,
+        displayName: displayName,
+        photoUrl: photoUrl,
+      );
+    } on FirebaseException {
+      _logger.warning(
+        'Partner-visible profile refresh failed',
+        context: {'operation': 'syncPairMemberProfiles'},
+      );
+    }
+
     return _readBack('updateProfile', uid);
+  }
+
+  Future<void> _syncPairMemberProfiles(
+    String uid, {
+    String? displayName,
+    String? photoUrl,
+  }) async {
+    final pairs = await _firestore
+        .collection('pairs')
+        .where('memberIds', arrayContains: uid)
+        .where('status', isEqualTo: 'active')
+        .get();
+    final existingProfile = await _profile(uid).get();
+    final storedName = existingProfile.data()?['displayName'];
+    final name = displayName ?? (storedName is String ? storedName : null);
+    final update = <String, Object?>{
+      'displayName': ?name,
+      'photoUrl': ?photoUrl,
+    };
+    if (update.isEmpty) return;
+    await Future.wait(
+      pairs.docs.map(
+        (pair) => pair.reference
+            .collection('members')
+            .doc(uid)
+            .set(update, SetOptions(merge: true)),
+      ),
+    );
   }
 
   @override
