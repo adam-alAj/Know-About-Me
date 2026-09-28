@@ -19,7 +19,10 @@ void main() {
 
     await tester.tap(find.text('Rules'));
     await tester.pumpAndSettle();
-    expect(find.text('No rules yet'), findsOneWidget);
+    // Phase 14 replaced the placeholder with rule management. Without an active
+    // connection there is nothing to manage yet, so the screen states that
+    // honestly instead of offering a rule that could not be saved.
+    expect(find.text('No connection yet'), findsOneWidget);
 
     await tester.tap(find.text('History'));
     await tester.pumpAndSettle();

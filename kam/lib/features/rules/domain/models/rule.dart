@@ -188,6 +188,45 @@ class Rule {
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
+  /// Returns a copy with the supplied fields replaced.
+  ///
+  /// Nullable fields use `??`, so this cannot *clear* an optional field; the
+  /// rule lifecycle only ever sets or replaces values (enable/disable, rename,
+  /// re-save), so that limitation is deliberate rather than accidental.
+  Rule copyWith({
+    String? id,
+    String? ownerUserId,
+    String? pairId,
+    String? name,
+    int? version,
+    RuleConditionGroup? conditionGroup,
+    RuleCondition? condition,
+    List<RuleAction>? actions,
+    bool? enabled,
+    bool? allowStaleData,
+    Duration? cooldown,
+    DateTime? lastTriggeredAt,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return Rule(
+      id: id ?? this.id,
+      ownerUserId: ownerUserId ?? this.ownerUserId,
+      pairId: pairId ?? this.pairId,
+      name: name ?? this.name,
+      version: version ?? this.version,
+      conditionGroup: conditionGroup ?? this.conditionGroup,
+      condition: condition ?? this.condition,
+      actions: actions ?? this.actions,
+      enabled: enabled ?? this.enabled,
+      allowStaleData: allowStaleData ?? this.allowStaleData,
+      cooldown: cooldown ?? this.cooldown,
+      lastTriggeredAt: lastTriggeredAt ?? this.lastTriggeredAt,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
   /// Whether the cooldown allows a new notification at [now] (FR-039).
   bool isCoolingDownAt(DateTime now) {
     final last = lastTriggeredAt;

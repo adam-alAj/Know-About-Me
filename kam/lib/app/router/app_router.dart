@@ -11,6 +11,7 @@ import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/history/presentation/history_screen.dart';
 import '../../features/privacy/presentation/privacy_screen.dart';
 import '../../features/pairing/presentation/pairing_screen.dart';
+import '../../features/rules/presentation/rule_builder_screen.dart';
 import '../../features/rules/presentation/rules_screen.dart';
 import 'app_routes.dart';
 import 'app_shell.dart';
@@ -77,6 +78,20 @@ GoRouter createAppRouter({
                 path: AppRoutes.rulesPath,
                 name: AppRoutes.rules,
                 builder: (context, state) => const RulesScreen(),
+                routes: <RouteBase>[
+                  GoRoute(
+                    path: 'new',
+                    name: AppRoutes.ruleCreate,
+                    builder: (context, state) => const RuleBuilderScreen(),
+                  ),
+                  GoRoute(
+                    path: ':ruleId/edit',
+                    name: AppRoutes.ruleEdit,
+                    builder: (context, state) => RuleBuilderScreen(
+                      ruleId: state.pathParameters['ruleId'],
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

@@ -189,6 +189,23 @@ rules reject anything outside that set.
 Rule **definitions** are private: `users/{ownerId}/rules/{ruleId}`, owner-only.
 The partner never reads the rules; the partner sees the **interpretation**.
 
+A rule document (written by Phase 14) holds `ownerUserId` (must equal the path
+owner), `pairId`, `name` (≤ 120), `version` (≥ 1), `enabled`, `allowStaleData`,
+`cooldownSeconds`, a `condition` map (`metric`, `operator`, and exactly one of
+`numericThreshold` / `stateValue` / `durationSeconds`), an optional
+`conditionGroup` (`operator` `all`|`any` plus a `conditions` list), an `actions`
+list (≤ 8; a probability action carries `isUserDefined: true`), an optional
+`lastTriggeredAt`, server-authoritative `createdAt` / `updatedAt`, and
+`schemaVersion: 1`. The document id is a client-generated opaque string and is
+never stored inside the document.
+
+The Security Rules close the field set (`keys().hasOnly([...])`), type- and
+range-check the values, require `updatedAt == request.time` on every write and
+`createdAt == request.time` on create, and keep `createdAt` immutable on update.
+Rule definitions are therefore owner-private and cannot be forged: the client is
+never trusted with ownership, and a partner inside an active pair still cannot
+read them. See `docs/rules/RULE_BUILDER_AND_MANAGEMENT.md` §18 – §19.
+
 Interpretations are pair-scoped and append-only:
 
 ```text

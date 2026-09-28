@@ -1383,3 +1383,152 @@ test('an unknown home presence value is rejected', async () => {
     })),
   );
 });
+
+// ============================ Phase 14: rule definitions =====================
+// Rule *definitions* are private to their owner (Phase 14). These assertions are
+// the executable specification of the `users/{uid}/rules` rules block: owner
+// binding, server-authoritative timestamps, a closed field set, type-checked
+// values, and partner/cross-user isolation.
+
+/// A complete, well-formed rule document as the Flutter writer sends it.
+function validRule(ownerId, overrides = {}) {
+  return {
+    ownerUserId: ownerId,
+    pairId: 'p1',
+    name: 'Long Charging',
+    version: 1,
+    enabled: true,
+    allowStaleData: false,
+    cooldownSeconds: 1800,
+    condition: {
+      metric: 'chargingDuration',
+      operator: 'greaterThanOrEqual',
+      durationSeconds: 14400,
+    },
+    actions: [
+      {
+        type: 'displayProbability',
+        messageTemplate: 'may be sleeping',
+        probabilityPercent: 70,
+        isUserDefined: true,
+      },
+    ],
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    schemaVersion: 1,
+    ...overrides,
+  };
+}
+
+test('the owner can create a well-formed rule', async () => {
+  const db = as('uA');
+  await assertSucceeds(setDoc(doc(db, 'users', 'uA', 'rules', 'newRule'), validRule('uA')));
+});
+
+test('a rule can be created for the owner only', async () => {
+  const db = as('uB');
+  await assertFails(setDoc(doc(db, 'users', 'uA', 'rules', 'forged'), validRule('uA')));
+  await assertFails(setDoc(doc(db, 'users', 'uA', 'rules', 'spoofed'), validRule('uB')));
+});
+
+test('an unauthenticated client cannot read or write rules', async () => {
+  const db = anon();
+  await assertFails(getDoc(doc(db, 'users', 'uA', 'rules', 'r1')));
+  await assertFails(setDoc(doc(db, 'users', 'uA', 'rules', 'anon'), validRule('uA')));
+});
+
+test('a rule write must be stamped by the server', async () => {
+  const db = as('uA');
+  await assertFails(
+    setDoc(doc(db, 'users', 'uA', 'rules', 'backdated'), validRule('uA', {
+      createdAt: ts(),
+      updatedAt: ts(),
+    })),
+  );
+});
+
+test('a rule document may not carry fields outside the documented set', async () => {
+  const db = as('uA');
+  await assertFails(
+    setDoc(doc(db, 'users', 'uA', 'rules', 'extra'), validRule('uA', { admin: true })),
+  );
+});
+
+test('rule values are type- and range-checked before storage', async () => {
+  const db = as('uA');
+  await assertFails(
+    setDoc(doc(db, 'users', 'uA', 'rules', 'badVersion'), validRule('uA', { version: 'one' })),
+  );
+  await assertFails(
+    setDoc(doc(db, 'users', 'uA', 'rules', 'badEnabled'), validRule('uA', { enabled: 'yes' })),
+  );
+  await assertFails(
+    setDoc(doc(db, 'users', 'uA', 'rules', 'badCooldown'), validRule('uA', { cooldownSeconds: -1 })),
+  );
+  await assertFails(
+    setDoc(doc(db, 'users', 'uA', 'rules', 'badCondition'), validRule('uA', { condition: 'nope' })),
+  );
+  await assertFails(
+    setDoc(doc(db, 'users', 'uA', 'rules', 'badSchema'), validRule('uA', { schemaVersion: 2 })),
+  );
+  await assertSucceeds(setDoc(doc(db, 'users', 'uA', 'rules', 'good'), validRule('uA')));
+});
+
+test('a rule can be edited with a server timestamp and keeps its creation time', async () => {
+  const db = as('uA');
+  await assertSucceeds(setDoc(doc(db, 'users', 'uA', 'rules', 'editable'), validRule('uA')));
+
+  await assertSucceeds(
+    updateDoc(doc(db, 'users', 'uA', 'rules', 'editable'), {
+      name: 'Long Charging (5 hours)',
+      version: 2,
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a rule edit cannot backdate and cannot rewrite the creation time', async () => {
+  const db = as('uA');
+  await assertSucceeds(setDoc(doc(db, 'users', 'uA', 'rules', 'editable'), validRule('uA')));
+
+  await assertFails(
+    updateDoc(doc(db, 'users', 'uA', 'rules', 'editable'), {
+      name: 'Backdated',
+      updatedAt: ts(),
+    }),
+  );
+  await assertFails(
+    updateDoc(doc(db, 'users', 'uA', 'rules', 'editable'), {
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a user cannot read, edit or delete another user\'s rule', async () => {
+  const db = as('uB');
+  await assertFails(getDoc(doc(db, 'users', 'uA', 'rules', 'r1')));
+  await assertFails(
+    updateDoc(doc(db, 'users', 'uA', 'rules', 'r1'), {
+      name: 'Hijacked',
+      updatedAt: serverTimestamp(),
+    }),
+  );
+  await assertFails(deleteDoc(doc(db, 'users', 'uA', 'rules', 'r1')));
+});
+
+test('the owner may delete their own rule', async () => {
+  const db = as('uB');
+  await assertSucceeds(setDoc(doc(db, 'users', 'uB', 'rules', 'mine'), validRule('uB')));
+  await assertSucceeds(deleteDoc(doc(db, 'users', 'uB', 'rules', 'mine')));
+});
+
+test('a partner cannot read the owner\'s rule definitions inside an active pair', async () => {
+  // uA and uB share battery and network in p1, but rule definitions stay private.
+  const db = as('uB');
+  await assertFails(getDoc(doc(db, 'users', 'uA', 'rules', 'r1')));
+  // A partner cannot even list another user's rule definitions.
+  await assertFails(getDocs(collection(db, 'users', 'uA', 'rules')));
+  // The owner can list their own.
+  await assertSucceeds(getDocs(collection(as('uA'), 'users', 'uA', 'rules')));
+});

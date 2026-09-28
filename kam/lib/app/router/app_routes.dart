@@ -18,6 +18,10 @@ abstract final class AppRoutes {
   // Pages pushed above the shell.
   static const String profile = 'profile';
 
+  // Rule builder, nested under the rules destination.
+  static const String ruleCreate = 'rule-create';
+  static const String ruleEdit = 'rule-edit';
+
   // Reserved for the pairing phase; declared now so guards can reference it.
   static const String pairing = 'pairing';
 
@@ -30,4 +34,8 @@ abstract final class AppRoutes {
   static const String privacyPath = '/privacy';
   static const String profilePath = '/profile';
   static const String pairingPath = '/pairing';
+  static const String ruleCreatePath = '/rules/new';
+
+  /// The builder location for an existing rule.
+  static String ruleEditPath(String ruleId) => '/rules/$ruleId/edit';
 }

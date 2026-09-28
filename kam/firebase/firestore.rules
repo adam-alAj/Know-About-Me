@@ -380,20 +380,73 @@ service cloud.firestore {
       }
 
       // Rule definitions are private to their owner. The partner only ever sees
-      // the interpretations a rule produces.
+      // the interpretations a rule produces (Phase 14).
+      //
+      // The owner is bound to the path and the stored `ownerUserId`, and the
+      // allowed field set is closed, so a modified client cannot smuggle extra
+      // data into a rule document or write a rule for somebody else. The
+      // condition shape is type-checked so a reader is never handed something it
+      // could not interpret; semantic validation lives in the Dart domain layer,
+      // which is the layer that authors these documents.
       match /rules/{ruleId} {
+        function ruleKeys() {
+          return [
+            'ownerUserId', 'pairId', 'name', 'version', 'enabled',
+            'allowStaleData', 'cooldownSeconds', 'condition', 'conditionGroup',
+            'actions', 'lastTriggeredAt', 'createdAt', 'updatedAt',
+            'schemaVersion'
+          ];
+        }
+
+        // A condition must at least name a metric and an operator. Deeper
+        // validation would duplicate the Dart domain model without adding a
+        // security guarantee, because a malformed rule grants no access.
+        function conditionValid(condition) {
+          return condition is map
+            && condition.metric is string
+            && condition.operator is string
+            && (!('stateValue' in condition) || condition.stateValue is string)
+            && (!('numericThreshold' in condition) || condition.numericThreshold is number)
+            && (!('durationSeconds' in condition) || condition.durationSeconds is int);
+        }
+
+        function ruleValid() {
+          return request.resource.data.ownerUserId == userId
+            && request.resource.data.pairId is string
+            && request.resource.data.pairId.size() > 0
+            && request.resource.data.pairId.size() <= 128
+            && request.resource.data.name is string
+            && request.resource.data.name.size() > 0
+            && request.resource.data.name.size() <= 120
+            && request.resource.data.version is int
+            && request.resource.data.version >= 1
+            && request.resource.data.enabled is bool
+            && (!('allowStaleData' in request.resource.data)
+                || request.resource.data.allowStaleData is bool)
+            && request.resource.data.cooldownSeconds is int
+            && request.resource.data.cooldownSeconds >= 0
+            && conditionValid(request.resource.data.condition)
+            && (!('conditionGroup' in request.resource.data)
+                || request.resource.data.conditionGroup is map)
+            && request.resource.data.actions is list
+            // A user-configured percentage must never be stored as if measured.
+            && request.resource.data.actions.size() <= 8
+            && request.resource.data.schemaVersion == 1
+            && request.resource.data.keys().hasOnly(ruleKeys());
+        }
+
         allow read, delete: if isSelf(userId);
 
-        allow create, update: if isSelf(userId)
-          && request.resource.data.ownerUserId == userId
-          && request.resource.data.pairId is string
-          && request.resource.data.name is string
-          && request.resource.data.name.size() <= 120
-          && request.resource.data.condition is map
-          && request.resource.data.actions is list
-          && request.resource.data.enabled is bool
-          // A user-configured percentage must never be stored as if measured.
-          && request.resource.data.actions.size() <= 8;
+        allow create: if isSelf(userId)
+          && ruleValid()
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.updatedAt == request.time;
+
+        // The creation time is immutable, so an edit cannot rewrite history.
+        allow update: if isSelf(userId)
+          && ruleValid()
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.updatedAt == request.time;
       }
 
       // Push tokens. Owner-only: a token is never readable by a partner.
