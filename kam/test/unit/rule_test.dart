@@ -57,12 +57,63 @@ void main() {
       expect(rule.isCoolingDownAt(now), isFalse);
     });
 
+    test('cooldown ends at the exact configured duration boundary', () {
+      final rule = buildRule(
+        lastTriggeredAt: now.subtract(const Duration(minutes: 30)),
+      );
+
+      expect(rule.isCoolingDownAt(now), isFalse);
+    });
+
     test('a probability action requires a user-configured percentage', () {
       expect(
         () => RuleAction(type: RuleActionType.displayProbability),
         throwsA(isA<AssertionError>()),
       );
     });
+
+    test('user-defined probability accepts only 0 through 100 inclusive', () {
+      for (final value in [0, 50, 100]) {
+        expect(
+          RuleAction(
+            type: RuleActionType.displayProbability,
+            probabilityPercent: value,
+          ).probabilityPercent,
+          value,
+        );
+      }
+      for (final value in [-1, 101]) {
+        expect(
+          () => RuleAction(
+            type: RuleActionType.displayProbability,
+            probabilityPercent: value,
+          ),
+          throwsA(isA<AssertionError>()),
+        );
+      }
+    });
+
+    test(
+      'rule validation catches state strings outside the closed vocabulary',
+      () {
+        final invalid = Rule(
+          id: 'rule-1',
+          ownerUserId: 'user-a',
+          pairId: 'pair-1',
+          name: 'Invalid state',
+          condition: const RuleCondition(
+            metric: RuleMetric.networkType,
+            operator: RuleOperator.isA,
+            stateValue: 'space-network',
+          ),
+          actions: const [],
+        );
+        expect(
+          invalid.validate().map((issue) => issue.code),
+          contains('invalid_state_value'),
+        );
+      },
+    );
   });
 
   group('Interpretation', () {

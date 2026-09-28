@@ -2,6 +2,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kam/core/freshness/data_freshness.dart';
 import 'package:kam/features/device_state/domain/models/device_state.dart';
 import 'package:kam/features/device_state/domain/models/metric_value.dart';
+import 'package:kam/features/device_state/domain/models/device_state_snapshot.dart';
+import 'package:kam/features/device_state/domain/models/device_location_state.dart'
+    as normalized_location;
+import 'package:kam/features/device_state/domain/models/battery_state.dart'
+    as normalized_battery;
+import 'package:kam/features/device_state/domain/models/network_state.dart'
+    as normalized_network;
 import 'package:kam/features/rules/domain/models/rule.dart';
 import 'package:kam/features/rules/domain/rule_evaluation.dart';
 import 'package:kam/features/rules/domain/rule_evaluator.dart';
@@ -46,6 +53,8 @@ void main() {
   Rule rule({
     required RuleCondition condition,
     List<RuleAction>? actions,
+    int version = 1,
+    RuleConditionGroup? conditionGroup,
     bool enabled = true,
     Duration cooldown = const Duration(minutes: 30),
     DateTime? lastTriggeredAt,
@@ -56,6 +65,8 @@ void main() {
       pairId: 'p1',
       name: 'Possible sleep',
       condition: condition,
+      conditionGroup: conditionGroup,
+      version: version,
       actions:
           actions ??
           const [
@@ -115,6 +126,34 @@ void main() {
 
       expect(result.outcome, RuleEvaluationOutcome.matched);
     });
+
+    test(
+      'strict and inclusive comparisons treat the exact boundary correctly',
+      () {
+        const cases = <(RuleOperator, int, RuleEvaluationOutcome)>[
+          (RuleOperator.greaterThan, 50, RuleEvaluationOutcome.notMatched),
+          (RuleOperator.greaterThanOrEqual, 50, RuleEvaluationOutcome.matched),
+          (RuleOperator.lessThan, 50, RuleEvaluationOutcome.notMatched),
+          (RuleOperator.lessThanOrEqual, 50, RuleEvaluationOutcome.matched),
+          (RuleOperator.equalTo, 50, RuleEvaluationOutcome.matched),
+          (RuleOperator.notEqualTo, 50, RuleEvaluationOutcome.notMatched),
+        ];
+        for (final (operator, value, expected) in cases) {
+          final result = evaluator.evaluate(
+            rule: rule(
+              condition: RuleCondition(
+                metric: RuleMetric.batteryPercentage,
+                operator: operator,
+                numericThreshold: 50,
+              ),
+            ),
+            deviceState: state(battery: observed(value)),
+            nowUtc: now,
+          );
+          expect(result.outcome, expected, reason: operator.name);
+        }
+      },
+    );
   });
 
   group('duration conditions', () {
@@ -158,6 +197,28 @@ void main() {
       );
 
       expect(result.outcome, RuleEvaluationOutcome.notMatched);
+    });
+
+    test('240 minute threshold treats 239, 240, and 241 deterministically', () {
+      const values = <(int, RuleEvaluationOutcome)>[
+        (239, RuleEvaluationOutcome.notMatched),
+        (240, RuleEvaluationOutcome.matched),
+        (241, RuleEvaluationOutcome.matched),
+      ];
+      for (final (minutes, expected) in values) {
+        final result = evaluator.evaluate(
+          rule: rule(condition: chargingFor4h),
+          deviceState: state(
+            chargingDuration: MetricValue<Duration>.derived(
+              value: Duration(minutes: minutes),
+              observedAt: now,
+              source: 'test',
+            ),
+          ),
+          nowUtc: now,
+        );
+        expect(result.outcome, expected, reason: '$minutes minutes');
+      }
     });
 
     test('hasRemainedInStateFor requires the state and its duration', () {
@@ -244,12 +305,12 @@ void main() {
         nowUtc: now,
       );
 
-      expect(result.outcome, RuleEvaluationOutcome.insufficientData);
+      expect(result.outcome, RuleEvaluationOutcome.unknown);
       expect(result.isIndeterminate, isTrue);
       expect(result.interpretation, isNull);
     });
 
-    test('an unsupported metric is reported as insufficient data', () {
+    test('an unsupported metric has its own structured outcome', () {
       const condition = RuleCondition(
         metric: RuleMetric.batteryPercentage,
         operator: RuleOperator.greaterThan,
@@ -264,7 +325,7 @@ void main() {
         nowUtc: now,
       );
 
-      expect(result.outcome, RuleEvaluationOutcome.insufficientData);
+      expect(result.outcome, RuleEvaluationOutcome.unsupported);
       expect(result.note, contains('unsupported'));
     });
 
@@ -315,6 +376,7 @@ void main() {
 
       expect(result.outcome, RuleEvaluationOutcome.matched);
       expect(result.interpretation!.basis.first.description, 'Battery: 82%');
+      expect(result.staleInputMetrics, ['batteryPercentage']);
     });
 
     test('a recently observed value is still usable', () {
@@ -488,7 +550,7 @@ void main() {
       expect(result.outcome, RuleEvaluationOutcome.matched);
     });
 
-    test('a missing location state is insufficient data, never zero', () {
+    test('a missing location state is unknown, never zero', () {
       final result = evaluator.evaluate(
         rule: rule(
           condition: const RuleCondition(
@@ -501,7 +563,7 @@ void main() {
         nowUtc: now,
       );
 
-      expect(result.outcome, RuleEvaluationOutcome.insufficientData);
+      expect(result.outcome, RuleEvaluationOutcome.unknown);
     });
 
     test('location availability is reported as a named state', () {
@@ -544,7 +606,7 @@ void main() {
         nowUtc: now,
       );
 
-      expect(result.outcome, RuleEvaluationOutcome.insufficientData);
+      expect(result.outcome, RuleEvaluationOutcome.unsupported);
     });
   });
 
@@ -588,5 +650,294 @@ void main() {
       expect(results[0].outcome, RuleEvaluationOutcome.staleData);
       expect(results[1].outcome, RuleEvaluationOutcome.staleData);
     });
+  });
+
+  group('condition groups and stable evaluation metadata', () {
+    const batteryAbove50 = RuleCondition(
+      metric: RuleMetric.batteryPercentage,
+      operator: RuleOperator.greaterThan,
+      numericThreshold: 50,
+    );
+    const charging = RuleCondition(
+      metric: RuleMetric.chargingState,
+      operator: RuleOperator.isA,
+      stateValue: 'charging',
+    );
+
+    test('AND and OR groups preserve three-valued unknown semantics', () {
+      final andResult = evaluator.evaluate(
+        rule: rule(
+          condition: batteryAbove50,
+          conditionGroup: const RuleConditionGroup(
+            operator: RuleGroupOperator.all,
+            conditions: [batteryAbove50, charging],
+          ),
+        ),
+        deviceState: state(battery: observed(70)),
+        nowUtc: now,
+      );
+      expect(andResult.outcome, RuleEvaluationOutcome.unknown);
+      expect(andResult.matchedConditions, [0]);
+      expect(andResult.unknownConditions, [1]);
+
+      final orResult = evaluator.evaluate(
+        rule: rule(
+          condition: batteryAbove50,
+          conditionGroup: const RuleConditionGroup(
+            operator: RuleGroupOperator.any,
+            conditions: [batteryAbove50, charging],
+          ),
+        ),
+        deviceState: state(battery: observed(70)),
+        nowUtc: now,
+      );
+      expect(orResult.outcome, RuleEvaluationOutcome.matched);
+      expect(orResult.matchedConditions, [0]);
+      expect(orResult.ruleVersion, 1);
+      expect(orResult.evaluationId, isNotEmpty);
+    });
+
+    test(
+      'rule version and evaluation fingerprint are stable for same input',
+      () {
+        final input = state(battery: observed(82));
+        final configured = rule(condition: batteryAtLeast50, version: 7);
+        final first = evaluator.evaluate(
+          rule: configured,
+          deviceState: input,
+          nowUtc: now,
+        );
+        final second = evaluator.evaluate(
+          rule: configured,
+          deviceState: input,
+          nowUtc: now.add(const Duration(minutes: 1)),
+        );
+
+        expect(first.ruleVersion, 7);
+        expect(first.evaluationId, second.evaluationId);
+        expect(first.interpretation!.id, second.interpretation!.id);
+        expect(first.inputObservationTimes['batteryPercentage'], now);
+      },
+    );
+
+    test(
+      'malformed metric/operator combinations return a structured error',
+      () {
+        final result = evaluator.evaluate(
+          rule: rule(
+            condition: const RuleCondition(
+              metric: RuleMetric.batteryPercentage,
+              operator: RuleOperator.isA,
+              stateValue: 'charging',
+            ),
+          ),
+          deviceState: state(battery: observed(82)),
+          nowUtc: now,
+        );
+        expect(result.outcome, RuleEvaluationOutcome.error);
+        expect(result.note, contains('invalid_numeric_value'));
+        expect(result.interpretation, isNull);
+      },
+    );
+  });
+
+  group('canonical Phase 6–12 snapshot input', () {
+    test('evaluates normalized battery facts without using platform APIs', () {
+      final snapshot = DeviceStateSnapshot(
+        deviceId: 'device-a',
+        collectedAt: now,
+        capabilities: const {},
+        battery: normalized_battery.BatteryState(
+          percentage: StateObservation<int>(
+            availability: CapabilityAvailability.available,
+            value: 82,
+            observedAt: now,
+            source: 'test',
+          ),
+          chargingState:
+              const StateObservation<normalized_battery.BatteryChargingState>(
+                availability: CapabilityAvailability.unknown,
+              ),
+          chargingDuration: const StateObservation<Duration>(
+            availability: CapabilityAvailability.unknown,
+          ),
+          chargingSource:
+              const StateObservation<normalized_battery.BatteryChargingSource>(
+                availability: CapabilityAvailability.unknown,
+              ),
+        ),
+      );
+      final result = evaluator.evaluateSnapshot(
+        rule: rule(condition: batteryAtLeast50, version: 4),
+        snapshot: snapshot,
+        nowUtc: now,
+      );
+
+      expect(result.outcome, RuleEvaluationOutcome.matched);
+      expect(result.ruleVersion, 4);
+      expect(result.inputObservationTimes['batteryPercentage'], now);
+      expect(result.interpretation!.basis.single.description, 'Battery: 82%');
+    });
+
+    test('preserves an unsupported normalized network capability', () {
+      final snapshot = DeviceStateSnapshot(
+        deviceId: 'device-a',
+        collectedAt: now,
+        capabilities: const {},
+        network: normalized_network.NetworkState(
+          connectivity:
+              const StateObservation<normalized_network.ConnectivityType>(
+                availability: CapabilityAvailability.unsupported,
+              ),
+          internet:
+              const StateObservation<normalized_network.InternetReachability>(
+                availability: CapabilityAvailability.unknown,
+              ),
+          status:
+              const StateObservation<normalized_network.NetworkOnlineStatus>(
+                availability: CapabilityAvailability.unknown,
+              ),
+          offlineDuration: const StateObservation<Duration>(
+            availability: CapabilityAvailability.unknown,
+          ),
+        ),
+      );
+      final result = evaluator.evaluateSnapshot(
+        rule: rule(
+          condition: const RuleCondition(
+            metric: RuleMetric.networkType,
+            operator: RuleOperator.isA,
+            stateValue: 'wifi',
+          ),
+        ),
+        snapshot: snapshot,
+        nowUtc: now,
+      );
+
+      expect(result.outcome, RuleEvaluationOutcome.unsupported);
+      expect(result.interpretation, isNull);
+    });
+
+    test(
+      'evaluates offline state and duration from one normalized snapshot',
+      () {
+        final snapshot = DeviceStateSnapshot(
+          deviceId: 'device-a',
+          collectedAt: now,
+          capabilities: const {},
+          network: normalized_network.NetworkState(
+            connectivity:
+                const StateObservation<normalized_network.ConnectivityType>(
+                  availability: CapabilityAvailability.available,
+                  value: normalized_network.ConnectivityType.none,
+                ),
+            internet:
+                const StateObservation<normalized_network.InternetReachability>(
+                  availability: CapabilityAvailability.available,
+                  value: normalized_network.InternetReachability.unavailable,
+                ),
+            status: StateObservation<normalized_network.NetworkOnlineStatus>(
+              availability: CapabilityAvailability.available,
+              value: normalized_network.NetworkOnlineStatus.offline,
+              observedAt: now,
+            ),
+            offlineDuration: StateObservation<Duration>(
+              availability: CapabilityAvailability.available,
+              value: const Duration(minutes: 90),
+              observedAt: now,
+            ),
+          ),
+        );
+        final offline = const RuleCondition(
+          metric: RuleMetric.networkStatus,
+          operator: RuleOperator.isA,
+          stateValue: 'offline',
+        );
+        final offlineLongEnough = const RuleCondition(
+          metric: RuleMetric.offlineDuration,
+          operator: RuleOperator.greaterThanOrEqual,
+          numericThreshold: 60,
+        );
+        final result = evaluator.evaluateSnapshot(
+          rule: rule(
+            condition: offline,
+            conditionGroup: RuleConditionGroup(
+              operator: RuleGroupOperator.all,
+              conditions: [offline, offlineLongEnough],
+            ),
+          ),
+          snapshot: snapshot,
+          nowUtc: now,
+        );
+
+        expect(result.outcome, RuleEvaluationOutcome.matched);
+        expect(result.matchedConditions, [0, 1]);
+        expect(result.interpretation!.basis, hasLength(2));
+      },
+    );
+
+    test(
+      'normalizes distance from metres to kilometres and rejects stale fixes',
+      () {
+        DeviceStateSnapshot snapshotFor(StateObservation<double> distance) =>
+            DeviceStateSnapshot(
+              deviceId: 'device-a',
+              collectedAt: now,
+              capabilities: const {},
+              location: normalized_location.DeviceLocationState(
+                location:
+                    const StateObservation<normalized_location.LocationFix>(
+                      availability: CapabilityAvailability.unknown,
+                    ),
+                lastKnownLocation:
+                    const StateObservation<normalized_location.LocationFix>(
+                      availability: CapabilityAvailability.unknown,
+                    ),
+                permission: const StateObservation<DevicePermissionState>(
+                  availability: CapabilityAvailability.unknown,
+                ),
+                serviceState: normalized_location.LocationServiceState.unknown,
+                distanceFromHome: distance,
+                presence: HomePresence.awayFromHome,
+                homeConfigured: true,
+                homeEnabled: true,
+              ),
+            );
+        const condition = RuleCondition(
+          metric: RuleMetric.distanceFromHomeKm,
+          operator: RuleOperator.greaterThan,
+          numericThreshold: 5,
+        );
+        final current = evaluator.evaluateSnapshot(
+          rule: rule(condition: condition),
+          snapshot: snapshotFor(
+            StateObservation<double>(
+              availability: CapabilityAvailability.available,
+              value: 5100,
+              observedAt: now,
+            ),
+          ),
+          nowUtc: now,
+        );
+        final stale = evaluator.evaluateSnapshot(
+          rule: rule(condition: condition),
+          snapshot: snapshotFor(
+            StateObservation<double>(
+              availability: CapabilityAvailability.stale,
+              value: 5100,
+              observedAt: now.subtract(const Duration(hours: 6)),
+            ),
+          ),
+          nowUtc: now,
+        );
+
+        expect(current.outcome, RuleEvaluationOutcome.matched);
+        expect(
+          current.interpretation!.basis.single.description,
+          'Distance from home: 5.1 km',
+        );
+        expect(stale.outcome, RuleEvaluationOutcome.staleData);
+      },
+    );
   });
 }

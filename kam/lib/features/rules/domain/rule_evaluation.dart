@@ -14,6 +14,18 @@ enum RuleEvaluationOutcome {
   /// The condition was evaluated against available data and does not hold.
   notMatched,
 
+  /// Required observation is absent or genuinely unknown.
+  unknown,
+
+  /// The platform or capability cannot provide the required input.
+  unsupported,
+
+  /// A required permission is not granted.
+  permissionDenied,
+
+  /// A malformed rule or invalid input prevented safe evaluation.
+  error,
+
   /// A metric the condition depends on is unknown, unsupported, unavailable or
   /// paused, so the condition could not be evaluated at all.
   ///
@@ -42,8 +54,14 @@ enum RuleEvaluationOutcome {
 class RuleEvaluationResult {
   const RuleEvaluationResult({
     required this.ruleId,
+    this.ruleVersion = 1,
     required this.outcome,
     required this.evaluatedAt,
+    this.evaluationId,
+    this.matchedConditions = const [],
+    this.unknownConditions = const [],
+    this.staleInputMetrics = const [],
+    this.inputObservationTimes = const {},
     this.interpretation,
     this.note,
   });
@@ -51,10 +69,26 @@ class RuleEvaluationResult {
   /// The rule this result belongs to.
   final String ruleId;
 
+  /// Exact persisted rule definition evaluated.
+  final int ruleVersion;
+
   final RuleEvaluationOutcome outcome;
 
   /// When the evaluation ran, in UTC.
   final DateTime evaluatedAt;
+
+  /// Deterministic fingerprint for deduplicating repeat evaluation of the same
+  /// rule definition and same input evidence. No identifiers or coordinates.
+  final String? evaluationId;
+
+  final List<int> matchedConditions;
+  final List<int> unknownConditions;
+
+  /// Stale inputs that were explicitly permitted by rule/caller policy.
+  final List<String> staleInputMetrics;
+
+  /// Observation timestamps keyed by metric name, normalized to UTC.
+  final Map<String, DateTime> inputObservationTimes;
 
   /// The produced interpretation. Present for [RuleEvaluationOutcome.matched]
   /// and [RuleEvaluationOutcome.coolingDown], absent otherwise.
@@ -82,7 +116,11 @@ class RuleEvaluationResult {
   /// satisfied or unsatisfied condition (FR-048).
   bool get isIndeterminate =>
       outcome == RuleEvaluationOutcome.insufficientData ||
-      outcome == RuleEvaluationOutcome.staleData;
+      outcome == RuleEvaluationOutcome.staleData ||
+      outcome == RuleEvaluationOutcome.unknown ||
+      outcome == RuleEvaluationOutcome.unsupported ||
+      outcome == RuleEvaluationOutcome.permissionDenied ||
+      outcome == RuleEvaluationOutcome.error;
 
   @override
   String toString() =>

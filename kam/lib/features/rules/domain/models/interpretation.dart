@@ -1,5 +1,7 @@
 import 'rule.dart';
 
+enum InterpretationProbabilityType { userDefined }
+
 /// One observed fact that an interpretation is based on.
 ///
 /// Exposing the basis satisfies SRS NFR-022's "Why am I seeing this?".
@@ -8,6 +10,7 @@ class InterpretationBasis {
     required this.metric,
     required this.description,
     this.formattedValue,
+    this.observedAt,
   });
 
   final RuleMetric metric;
@@ -18,6 +21,9 @@ class InterpretationBasis {
 
   /// The rendered observed value, for example `4h 08m`.
   final String? formattedValue;
+
+  /// When this fact was observed, in UTC. No coordinates are included.
+  final DateTime? observedAt;
 
   @override
   String toString() => 'InterpretationBasis(${metric.name}: $description)';
@@ -77,6 +83,11 @@ class Interpretation {
 
   /// Whether a user-configured percentage is attached.
   bool get hasUserDefinedProbability => probabilityPercent != null;
+
+  InterpretationProbabilityType? get probabilityType =>
+      probabilityPercent == null
+      ? null
+      : InterpretationProbabilityType.userDefined;
 
   @override
   String toString() => 'Interpretation($id, "$message")';
