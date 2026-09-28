@@ -122,6 +122,20 @@ abstract final class FirebaseErrorMapper {
   ) {
     final detail = error.message ?? error.code;
 
+    // Android can surface a missing Firebase Authentication project/provider
+    // configuration as a generic internal-error with this backend marker.
+    // Give the developer/user the one actionable setup step without exposing
+    // the raw backend message.
+    if (detail.contains('CONFIGURATION_NOT_FOUND')) {
+      return ConfigurationFailure(
+        'Account creation is not configured for this Firebase project. '
+        'Enable Firebase Authentication and Email/Password sign-in in the '
+        'Firebase Console.',
+        cause: detail,
+        stackTrace: stackTrace,
+      );
+    }
+
     switch (error.code) {
       // Deliberately combined: revealing which of these applies would leak
       // whether an account exists (account enumeration).

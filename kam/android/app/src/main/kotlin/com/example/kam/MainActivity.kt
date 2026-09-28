@@ -51,6 +51,7 @@ class MainActivity : FlutterActivity() {
     private var oneShotResult: MethodChannel.Result? = null
     private var oneShotFallback: Map<String, Any?>? = null
     private var oneShotFinished = true
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val oneShotHandler = Handler(Looper.getMainLooper())
     private val oneShotTimeout = Runnable {
         completeOneShot(oneShotFallback ?: mapOf("error" to "timeout"))
@@ -127,7 +128,7 @@ class MainActivity : FlutterActivity() {
                     val receiver = object : BroadcastReceiver() {
                         override fun onReceive(context: Context?, intent: Intent?) {
                             if (intent?.action == Intent.ACTION_BATTERY_CHANGED) {
-                                events.success(readBatteryState(intent))
+                                emitEvent(events, readBatteryState(intent))
                             }
                         }
                     }
@@ -167,18 +168,33 @@ class MainActivity : FlutterActivity() {
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
                     val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
                     val callback = object : ConnectivityManager.NetworkCallback() {
+                        override fun onAvailable(network: Network) {
+                            val capabilities = manager.getNetworkCapabilities(network)
+                            val state = capabilities?.let(::networkState) ?: readNetworkState()
+                            mainHandler.post {
+                                if (networkCallback === this) {
+                                    events.success(state)
+                                }
+                            }
+                        }
+
                         override fun onCapabilitiesChanged(
                             network: Network,
                             networkCapabilities: NetworkCapabilities,
                         ) {
-                            events.success(networkState(networkCapabilities))
+                            val state = networkState(networkCapabilities)
+                            mainHandler.post {
+                                if (networkCallback === this) {
+                                    events.success(state)
+                                }
+                            }
                         }
 
                         override fun onLost(network: Network) {
                             // Allow a default-network handoff to settle before
                             // the one-shot read, avoiding a false offline blip.
                             val lostCallback = this
-                            Handler(Looper.getMainLooper()).postDelayed({
+                            mainHandler.postDelayed({
                                 if (networkCallback === lostCallback) {
                                     events.success(readNetworkState())
                                 }
@@ -230,7 +246,7 @@ class MainActivity : FlutterActivity() {
                         override fun onReceive(context: Context?, intent: Intent?) {
                             when (intent?.action) {
                                 Intent.ACTION_SCREEN_ON, Intent.ACTION_SCREEN_OFF ->
-                                    events.success(readActivityState())
+                                    emitEvent(events, readActivityState())
                             }
                         }
                     }
@@ -252,7 +268,7 @@ class MainActivity : FlutterActivity() {
                         return
                     }
                     // Start from a real reading, never from an assumed state.
-                    events.success(readActivityState())
+                    emitEvent(events, readActivityState())
                 }
 
                 override fun onCancel(arguments: Any?) {
@@ -344,6 +360,11 @@ class MainActivity : FlutterActivity() {
 
     private fun locationManager(): LocationManager =
         getSystemService(Context.LOCATION_SERVICE) as LocationManager
+
+    /** Delivers EventChannel values on Flutter's Android UI thread. */
+    private fun emitEvent(events: EventChannel.EventSink, value: Any?) {
+        mainHandler.post { events.success(value) }
+    }
 
     private fun hasLocationPermission(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
@@ -507,7 +528,7 @@ class MainActivity : FlutterActivity() {
         stopLocationUpdates()
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                events.success(locationMap(location))
+                emitEvent(events, locationMap(location))
             }
 
             override fun onProviderDisabled(provider: String) {

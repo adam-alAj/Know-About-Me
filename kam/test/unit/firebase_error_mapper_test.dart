@@ -116,6 +116,19 @@ void main() {
         isA<ConfigurationFailure>(),
       );
     });
+
+    test('missing Firebase Auth setup has an actionable safe message', () {
+      final failure = FirebaseErrorMapper.toFailure(
+        auth(
+          'internal-error',
+          'An internal error has occurred. [ CONFIGURATION_NOT_FOUND ]',
+        ),
+      );
+
+      expect(failure, isA<ConfigurationFailure>());
+      expect(failure.message, contains('Enable Firebase Authentication'));
+      expect(failure.message, isNot(contains('CONFIGURATION_NOT_FOUND')));
+    });
   });
 
   group('Sanitisation', () {
