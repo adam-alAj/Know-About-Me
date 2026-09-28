@@ -1,7 +1,7 @@
-/// Categories used to filter history (SRS FR-051).
+/// Categories exposed by the history filter.
 enum EventCategory { device, network, location, charging, rules, notifications }
 
-/// Types of historical event the application records (SRS FR-049).
+/// A controlled vocabulary of meaningful events. Raw samples are never events.
 enum DeviceEventType {
   chargingStarted,
   chargingStopped,
@@ -9,66 +9,103 @@ enum DeviceEventType {
   deviceCameOnline,
   locationChangedSignificantly,
   ruleActivated,
+  ruleDeactivated,
+  ruleBecameUnknown,
   ruleNotificationGenerated,
   connectionChanged,
   sharingPermissionChanged,
+  interpretationGenerated,
+  notificationSuppressed,
 }
 
 extension DeviceEventTypeCategory on DeviceEventType {
-  /// The history category this event belongs to (FR-051).
-  EventCategory get category {
-    switch (this) {
-      case DeviceEventType.chargingStarted:
-      case DeviceEventType.chargingStopped:
-        return EventCategory.charging;
-      case DeviceEventType.deviceWentOffline:
-      case DeviceEventType.deviceCameOnline:
-        return EventCategory.network;
-      case DeviceEventType.locationChangedSignificantly:
-        return EventCategory.location;
-      case DeviceEventType.ruleActivated:
-        return EventCategory.rules;
-      case DeviceEventType.ruleNotificationGenerated:
-        return EventCategory.notifications;
-      case DeviceEventType.connectionChanged:
-      case DeviceEventType.sharingPermissionChanged:
-        return EventCategory.device;
-    }
-  }
+  EventCategory get category => switch (this) {
+    DeviceEventType.chargingStarted || DeviceEventType.chargingStopped => EventCategory.charging,
+    DeviceEventType.deviceWentOffline || DeviceEventType.deviceCameOnline || DeviceEventType.connectionChanged => EventCategory.network,
+    DeviceEventType.locationChangedSignificantly => EventCategory.location,
+    DeviceEventType.ruleActivated || DeviceEventType.ruleDeactivated || DeviceEventType.ruleBecameUnknown || DeviceEventType.interpretationGenerated => EventCategory.rules,
+    DeviceEventType.ruleNotificationGenerated || DeviceEventType.notificationSuppressed => EventCategory.notifications,
+    DeviceEventType.sharingPermissionChanged => EventCategory.device,
+  };
 }
 
-/// A meaningful state change or rule event stored for history (SRS FR-049,
-/// FR-050, FR-058).
+/// A normalized, privacy-minimized historical event.
 ///
-/// The system intentionally stores meaningful events plus current state rather
-/// than high-frequency raw telemetry (SRS FR-058, NFR-039).
+/// [id] is deterministic for a logical transition. [occurredAt] is the
+/// observation/evaluation time; [recordedAt] is assigned by Firestore on sync.
 class DeviceEvent {
   const DeviceEvent({
     required this.id,
     required this.pairId,
-    required this.deviceId,
+    this.deviceId = '',
     required this.type,
     required this.occurredAt,
+    this.ownerUserId,
     this.recordedAt,
+    this.observedAt,
+    this.source = 'device',
+    this.deduplicationKey,
     this.summary,
+    this.payload = const <String, Object?>{},
+    this.schemaVersion = 1,
   });
 
   final String id;
   final String pairId;
+  /// Local opaque device reference; omitted from remote history.
   final String deviceId;
+  final String? ownerUserId;
   final DeviceEventType type;
-
-  /// When the event happened on the device, in UTC (FR-050).
   final DateTime occurredAt;
-
-  /// When the server recorded the event, in UTC (NFR-026).
   final DateTime? recordedAt;
-
-  /// Optional concise human-readable summary that avoids private detail.
+  final DateTime? observedAt;
+  final String source;
+  final String? deduplicationKey;
   final String? summary;
-
-  /// History category of this event (FR-051).
+  final Map<String, Object?> payload;
+  final int schemaVersion;
   EventCategory get category => type.category;
+
+  Map<String, Object?> toJson({bool includeRecordedAt = true}) => {
+    'id': id,
+    'pairId': pairId,
+      if (deviceId.isNotEmpty) 'deviceId': deviceId,
+    if (ownerUserId != null) 'ownerUserId': ownerUserId,
+    'type': type.name,
+    'category': category.name,
+    'occurredAt': occurredAt.toUtc().toIso8601String(),
+    if (includeRecordedAt && recordedAt != null) 'recordedAt': recordedAt!.toUtc().toIso8601String(),
+    if (observedAt != null) 'observedAt': observedAt!.toUtc().toIso8601String(),
+    'source': source,
+    if (deduplicationKey != null) 'deduplicationKey': deduplicationKey,
+    if (summary != null) 'summary': summary,
+    if (payload.isNotEmpty) 'payload': payload,
+    'schemaVersion': schemaVersion,
+  };
+
+  factory DeviceEvent.fromJson(Map<String, Object?> json) {
+    final type = DeviceEventType.values.byName(json['type']! as String);
+    final category = EventCategory.values.byName(json['category']! as String);
+    if (type.category != category) throw const FormatException('Event category does not match type.');
+    final occurredAt = DateTime.tryParse(json['occurredAt'] as String? ?? '');
+    if (occurredAt == null) throw const FormatException('Invalid event time.');
+    DateTime? parseTime(Object? value) => value == null ? null : DateTime.tryParse(value as String)?.toUtc();
+    return DeviceEvent(
+      id: json['id']! as String,
+      pairId: json['pairId']! as String,
+      deviceId: json['deviceId'] as String? ?? '',
+      ownerUserId: json['ownerUserId'] as String?,
+      type: type,
+      occurredAt: occurredAt.toUtc(),
+      recordedAt: parseTime(json['recordedAt']),
+      observedAt: parseTime(json['observedAt']),
+      source: json['source'] as String? ?? 'device',
+      deduplicationKey: json['deduplicationKey'] as String?,
+      summary: json['summary'] as String?,
+      payload: json['payload'] == null ? const <String, Object?>{} : Map<String, Object?>.from(json['payload']! as Map),
+      schemaVersion: json['schemaVersion'] as int? ?? 1,
+    );
+  }
 
   @override
   String toString() => 'DeviceEvent($id, ${type.name}, $occurredAt)';

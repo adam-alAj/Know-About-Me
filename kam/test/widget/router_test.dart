@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:kam/features/history/domain/models/device_event.dart';
+import 'package:kam/features/history/domain/repositories/history_repository.dart';
+import 'package:kam/features/history/presentation/history_providers.dart';
+
 import '../support/test_app.dart';
 
 void main() {
@@ -15,7 +19,14 @@ void main() {
   });
 
   testWidgets('navigates between shell branches', (tester) async {
-    await pumpTestApp(tester);
+    await pumpTestApp(
+      tester,
+      overrides: [
+        localHistoryRepositoryProvider.overrideWithValue(
+          _EmptyHistoryRepository(),
+        ),
+      ],
+    );
 
     await tester.tap(find.text('Rules'));
     await tester.pumpAndSettle();
@@ -63,4 +74,19 @@ void main() {
 
     expect(find.text('Reassurance'), findsOneWidget);
   });
+}
+
+class _EmptyHistoryRepository implements HistoryRepository {
+  @override
+  Future<void> add(DeviceEvent event) async {}
+
+  @override
+  Future<List<DeviceEvent>> page({
+    EventCategory? category,
+    int limit = 50,
+    DateTime? before,
+  }) async => const <DeviceEvent>[];
+
+  @override
+  Future<void> clearLocal() async {}
 }

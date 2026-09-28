@@ -432,6 +432,20 @@ service cloud.firestore {
             // A user-configured percentage must never be stored as if measured.
             && request.resource.data.actions.size() <= 8
             && request.resource.data.schemaVersion == 1
+            && (
+              (request.resource.data.type in ['chargingStarted', 'chargingStopped']
+                && request.resource.data.category == 'charging')
+              || (request.resource.data.type in ['deviceWentOffline', 'deviceCameOnline', 'connectionChanged']
+                && request.resource.data.category == 'network')
+              || (request.resource.data.type == 'locationChangedSignificantly'
+                && request.resource.data.category == 'location')
+              || (request.resource.data.type in ['ruleActivated', 'ruleDeactivated', 'ruleBecameUnknown', 'interpretationGenerated']
+                && request.resource.data.category == 'rules')
+              || (request.resource.data.type in ['ruleNotificationGenerated', 'notificationSuppressed']
+                && request.resource.data.category == 'notifications')
+              || (request.resource.data.type == 'sharingPermissionChanged'
+                && request.resource.data.category == 'device')
+            )
             && request.resource.data.keys().hasOnly(ruleKeys());
         }
 
@@ -802,17 +816,78 @@ service cloud.firestore {
       }
 
       // --- meaningful events (history) -------------------------------------
-      // Append-only. A member may record events for their own device only, and
-      // must use a server timestamp so ordering is trustworthy (NFR-035).
+      // A member may create events for their own device only, and must use a
+      // server timestamp. Records cannot be rewritten; owners may delete their
+      // own events as a privacy control.
       match /events/{eventId} {
-        allow read: if isMember(pairId);
+        function validEvent() {
+          return request.resource.data.keys().hasOnly([
+              'ownerUserId', 'type', 'category', 'occurredAt', 'recordedAt',
+              'observedAt', 'source', 'deduplicationKey', 'summary',
+              'payload', 'schemaVersion'
+            ])
+            && request.resource.data.ownerUserId == uid()
+            && request.resource.data.type in [
+              'chargingStarted', 'chargingStopped', 'deviceWentOffline',
+              'deviceCameOnline', 'locationChangedSignificantly',
+              'ruleActivated', 'ruleDeactivated', 'ruleBecameUnknown',
+              'ruleNotificationGenerated', 'connectionChanged',
+              'sharingPermissionChanged', 'interpretationGenerated',
+              'notificationSuppressed'
+            ]
+            && request.resource.data.category in [
+              'device', 'network', 'location', 'charging', 'rules', 'notifications'
+            ]
+            && request.resource.data.occurredAt is timestamp
+            && request.resource.data.occurredAt <= request.time + duration.value(5, 'm')
+            && request.resource.data.recordedAt == request.time
+            && request.resource.data.source in ['device', 'rule', 'notification']
+            && request.resource.data.schemaVersion == 1
+            && (!('observedAt' in request.resource.data) || request.resource.data.observedAt is timestamp)
+            && (!('deduplicationKey' in request.resource.data)
+                || (request.resource.data.deduplicationKey is string
+                    && request.resource.data.deduplicationKey.size() <= 128))
+            && (!('summary' in request.resource.data)
+                || (request.resource.data.summary is string
+                    && request.resource.data.summary.size() <= 120))
+            && (!('payload' in request.resource.data)
+                || (request.resource.data.payload is map
+                    && request.resource.data.payload.keys().hasOnly(['transition', 'ruleVersion', 'outcome'])
+                    && request.resource.data.payload.size() <= 3
+                    && (!('transition' in request.resource.data.payload)
+                        || (request.resource.data.payload.transition is string
+                            && request.resource.data.payload.transition.size() <= 64))
+                    && (!('ruleVersion' in request.resource.data.payload)
+                        || (request.resource.data.payload.ruleVersion is int
+                            && request.resource.data.payload.ruleVersion > 0))
+                    && (!('outcome' in request.resource.data.payload)
+                        || (request.resource.data.payload.outcome is string
+                            && request.resource.data.payload.outcome.size() <= 40))));
+        }
+
+        // Event reads stop when mutual consent/active pairing ends. A member
+        // may still remove their own records after a pair has ended.
+        allow read: if isMember(pairId)
+          && (resource.data.ownerUserId == uid() || isActivePair(pairId));
 
         allow create: if isActivePair(pairId)
-          && request.resource.data.ownerUserId == uid()
-          && request.resource.data.occurredAt is timestamp
-          && request.resource.data.recordedAt == request.time;
+          && notPaused(pairId, uid())
+          && validEvent()
+          && (
+            (request.resource.data.category == 'charging'
+              && shares(pairId, uid(), 'charging'))
+            || (request.resource.data.category == 'network'
+              && shares(pairId, uid(), 'network'))
+            || (request.resource.data.category == 'location'
+              && shares(pairId, uid(), 'location'))
+            || (request.resource.data.category == 'rules'
+              && shares(pairId, uid(), 'ruleInterpretations'))
+            || (request.resource.data.category == 'notifications'
+              && shares(pairId, uid(), 'ruleInterpretations'))
+          );
 
-        allow update, delete: if false;
+        allow delete: if isMember(pairId) && resource.data.ownerUserId == uid();
+        allow update: if false;
       }
     }
 

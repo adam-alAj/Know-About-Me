@@ -875,23 +875,26 @@ test('a sharing document cannot contain an unknown category', async () => {
   );
 });
 
-test('history events are append-only', async () => {
+test('history events are immutable and only their owner may delete them', async () => {
   const db = as('uA');
   const event = doc(db, 'pairs', 'p1', 'events', 'e1');
 
   await assertSucceeds(
     setDoc(event, {
-      deviceId: 'devA',
       ownerUserId: 'uA',
-      type: 'chargingStarted',
-      category: 'charging',
+      type: 'deviceWentOffline',
+      category: 'network',
       occurredAt: ts(),
       recordedAt: serverTimestamp(),
+      source: 'device',
+      schemaVersion: 1,
+      deduplicationKey: 'stable-event-key',
+      summary: 'Connectivity unavailable',
     }),
   );
 
   await assertFails(updateDoc(event, { type: 'chargingStopped' }));
-  await assertFails(deleteDoc(event));
+  await assertSucceeds(deleteDoc(event));
 });
 
 test('a member cannot record an event as another user', async () => {
@@ -904,6 +907,35 @@ test('a member cannot record an event as another user', async () => {
       category: 'network',
       occurredAt: ts(),
       recordedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('history rejects fields outside the minimized event schema', async () => {
+  await assertFails(
+    setDoc(doc(as('uA'), 'pairs', 'p1', 'events', 'private-data'), {
+      ownerUserId: 'uA',
+      type: 'deviceWentOffline',
+      category: 'network',
+      occurredAt: ts(),
+      recordedAt: serverTimestamp(),
+      source: 'device',
+      schemaVersion: 1,
+      exactCoordinates: { latitude: 52.5, longitude: 13.4 },
+    }),
+  );
+});
+
+test('history writes require the matching enabled sharing category', async () => {
+  await assertFails(
+    setDoc(doc(as('uA'), 'pairs', 'p1', 'events', 'unshared-charge'), {
+      ownerUserId: 'uA',
+      type: 'chargingStarted',
+      category: 'charging',
+      occurredAt: ts(),
+      recordedAt: serverTimestamp(),
+      source: 'device',
+      schemaVersion: 1,
     }),
   );
 });

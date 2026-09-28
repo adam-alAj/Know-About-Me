@@ -12,6 +12,10 @@ import '../../../../core/ui/widgets/section_header.dart';
 import '../../../auth/presentation/providers/auth_providers.dart';
 import '../../../auth/domain/models/user_preferences.dart';
 import '../../../notifications/domain/rule_notification_planner.dart';
+import '../../../history/domain/models/device_event.dart';
+import '../../../history/presentation/history_providers.dart';
+import '../../../pairing/presentation/providers/pairing_providers.dart';
+import '../../domain/models/interpretation_result.dart';
 import '../providers/rule_evaluation_providers.dart';
 import 'rule_interpretation_card.dart';
 
@@ -97,18 +101,28 @@ class RuleInterpretationsSection extends ConsumerWidget {
   Future<void> _deliverNewMatches(WidgetRef ref, RuleEvaluationState state) async {
     final preferences = ref.read(currentUserPreferencesProvider).value?.valueOrNull;
     if (preferences == null ||
-        preferences.notificationPreference == NotificationPreference.noNotifications) return;
+        preferences.notificationPreference == NotificationPreference.noNotifications) {
+      return;
+    }
     final service = ref.read(localNotificationServiceProvider);
     final permission = await service.permissionState();
-    if (permission.valueOrNull != NotificationPermissionState.granted) return;
+    if (permission.valueOrNull != NotificationPermissionState.granted) {
+      for (final item in state.results.where((item) => item.isNewMatch)) {
+        await _recordAlert(ref, item, shown: false, reason: 'permissionUnavailable');
+      }
+      return;
+    }
     const planner = RuleNotificationPlanner();
     for (final item in state.results) {
       if (!item.rule.enabled || !item.isNewMatch || item.isBasedOnStaleData ||
-          item.observationTime == null) continue;
+          item.observationTime == null) {
+        continue;
+      }
       final key = '${item.ruleId}:v${item.ruleVersion}:${item.evaluation.evaluationId ?? item.evaluatedAt.toIso8601String()}';
       final lastAlert = _lastAlertAt[item.ruleId] ?? item.rule.lastTriggeredAt;
       if (lastAlert != null &&
           item.evaluatedAt.toUtc().difference(lastAlert.toUtc()) < item.rule.cooldown) {
+        await _recordAlert(ref, item, shown: false, reason: 'cooldown');
         continue;
       }
       if (!_attemptedAlertKeys.add(key)) continue;
@@ -117,7 +131,10 @@ class RuleInterpretationsSection extends ConsumerWidget {
         result: item.evaluation,
         preference: preferences.notificationPreference,
       );
-      if (!plan.shouldNotify) continue;
+      if (!plan.shouldNotify) {
+        await _recordAlert(ref, item, shown: false, reason: 'notEligible');
+        continue;
+      }
       // Lock screen text stays generic: user-authored rules and partner details
       // are shown only after the user opens the authorized app.
       final delivery = await service.show(LocalNotificationRequest(
@@ -126,8 +143,27 @@ class RuleInterpretationsSection extends ConsumerWidget {
         body: 'A rule you created matches shared device state. Open the app to review it.',
         payload: item.ruleId,
       ));
+      await _recordAlert(ref, item, shown: delivery.isSuccess,
+          reason: delivery.isSuccess ? 'shown' : 'deliveryFailed');
       if (delivery.isSuccess) _lastAlertAt[item.ruleId] = item.evaluatedAt.toUtc();
     }
+  }
+
+  Future<void> _recordAlert(WidgetRef ref, InterpretationResult item, {
+    required bool shown, required String reason,
+  }) async {
+    final scope = ref.read(partnerScopeProvider).value;
+    final uid = ref.read(currentIdentityProvider)?.uid;
+    if (scope == null || uid == null) return;
+    final key = '${scope.pairId}|$uid|${item.ruleId}|v${item.ruleVersion}|$reason|${item.evaluatedAt.toUtc().toIso8601String()}';
+    await ref.read(historyRecorderProvider).record(DeviceEvent(
+      id: historyEventId(key), pairId: scope.pairId, ownerUserId: uid,
+      type: shown ? DeviceEventType.ruleNotificationGenerated : DeviceEventType.notificationSuppressed,
+      occurredAt: item.evaluatedAt.toUtc(), observedAt: item.observationTime,
+      source: 'notification', deduplicationKey: historyEventId(key),
+      summary: shown ? 'A rule notification was shown' : 'A rule notification was suppressed',
+      payload: <String, Object?>{'outcome': reason, 'ruleVersion': item.ruleVersion},
+    ));
   }
 }
 

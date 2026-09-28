@@ -24,6 +24,7 @@ final ruleEvaluationServiceProvider = Provider<RuleEvaluationService>(
 class RuleEvaluationState {
   const RuleEvaluationState({
     this.results = const <InterpretationResult>[],
+    this.transitions = const <InterpretationResult>[],
     this.evaluatedAt,
     this.hasPartnerState = false,
     this.isLoading = false,
@@ -45,6 +46,11 @@ class RuleEvaluationState {
 
   /// Interpretations to show, already ordered by [RuleEvaluationCycle].
   final List<InterpretationResult> results;
+
+  /// All evaluated rule results, including false outcomes omitted from the UI.
+  /// History consumes transitions from this list; presentation remains limited
+  /// to matched and indeterminate results.
+  final List<InterpretationResult> transitions;
 
   /// When the cycle behind [results] ran, in UTC.
   final DateTime? evaluatedAt;
@@ -174,6 +180,7 @@ class RuleEvaluationController extends Notifier<RuleEvaluationState> {
 
     return RuleEvaluationState(
       results: cycle.displayable,
+      transitions: cycle.results,
       evaluatedAt: cycle.evaluatedAt,
       hasPartnerState: true,
     );

@@ -25,6 +25,7 @@ import '../../device_state/presentation/providers/device_state_providers.dart';
 import '../../device_state/presentation/widgets/activity_summary_card.dart';
 import '../../device_state/presentation/widgets/location_summary_card.dart';
 import '../../device_state/presentation/widgets/partner_sync_card.dart';
+import '../../history/presentation/recent_history_preview.dart';
 import '../../pairing/domain/models/pair_membership.dart';
 import '../../pairing/presentation/providers/pairing_providers.dart';
 import '../../privacy/domain/models/sharing_category.dart';
@@ -135,6 +136,8 @@ class _PartnerReassuranceDashboardState
               // separate screen: the facts and the user's reading of them stay
               // side by side.
               RuleInterpretationsSection(now: now),
+              const SizedBox(height: AppSpacing.lg),
+              const RecentHistoryPreview(),
               const SizedBox(height: AppSpacing.lg),
               AppButton.secondary(
                 label: 'Manage connection and sharing',

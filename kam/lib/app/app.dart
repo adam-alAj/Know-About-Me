@@ -8,6 +8,7 @@ import 'theme/app_theme.dart';
 import '../features/device_state/presentation/providers/device_state_providers.dart';
 import '../features/device_state/presentation/providers/device_monitoring_lifecycle.dart';
 import '../features/device_state/presentation/providers/sync_providers.dart';
+import '../features/history/presentation/history_providers.dart';
 
 /// The root widget of the application.
 ///
@@ -30,6 +31,7 @@ class KamApp extends ConsumerWidget {
     // long as the application does, and so its listeners are disposed with the
     // app rather than with one screen. It is inert without an active pair.
     ref.watch(deviceStateSyncCoordinatorProvider);
+    ref.watch(historyEventListenersProvider);
 
     return DeviceMonitoringLifecycle(
       controller: ref.watch(deviceMonitoringControllerProvider),
