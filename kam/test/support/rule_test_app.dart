@@ -4,6 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:kam/core/domain/device_metric.dart';
+import 'package:kam/features/device_state/domain/models/remote_device_state.dart';
+import 'package:kam/features/device_state/domain/models/state_observation.dart';
+import 'package:kam/features/location/domain/models/location_state.dart';
 import 'package:kam/features/rules/data/repositories/in_memory_rule_repository.dart';
 import 'package:kam/features/rules/domain/models/rule.dart';
 import 'package:kam/features/rules/presentation/providers/rule_providers.dart';
@@ -15,6 +19,117 @@ const RuleScope testRuleScope = RuleScope(
   ownerUserId: 'user-a',
   pairId: 'pair-1',
 );
+
+/// The instant every Phase 15 evaluation test starts from.
+///
+/// Matches the `createdAt` [testRule] uses, so a rule and the state it is
+/// evaluated against share one clock (NFR-033).
+final DateTime testNow = DateTime.utc(2026, 9, 28, 12);
+
+/// An authorized partner state document shaped exactly like
+/// `RemoteDeviceStateParser` produces one.
+///
+/// Only the metrics a test names are published; everything else stays absent,
+/// which is what surfaces as `unavailable` and is what the adapter must never
+/// fill in with a plausible default.
+RemoteDeviceState testPartnerState({
+  DateTime? now,
+  DateTime? observedAt,
+  int? batteryPercentage,
+  String? chargingState,
+  Duration? chargingDuration,
+  DateTime? chargingStartedAt,
+  String? networkStatus,
+  DateTime? lastOnlineAt,
+  String? screenState,
+  String? activityState,
+  DateTime? lastActivityAt,
+  String? availabilityState,
+  double? distanceFromHomeKm,
+  HomePresence? presence,
+  double? latitude,
+  double? longitude,
+  DateTime? locationObservedAt,
+}) {
+  final at = now ?? testNow;
+  final observed = observedAt ?? at;
+  final observations = <DeviceMetric, StateObservation<Object?>>{};
+
+  void publish(
+    DeviceMetric metric,
+    Object? value, {
+    DateTime? when,
+  }) {
+    observations[metric] = StateObservation<Object?>(
+      availability: CapabilityAvailability.available,
+      value: value,
+      observedAt: when ?? observed,
+      source: 'partner_sync',
+    );
+  }
+
+  if (batteryPercentage != null) {
+    publish(DeviceMetric.batteryPercentage, batteryPercentage);
+  }
+  if (chargingState != null) {
+    publish(DeviceMetric.chargingState, chargingState);
+  }
+  if (chargingDuration != null) {
+    // The wire format stamps this with the session start, exactly as
+    // `RemoteDeviceStateParser` does, so the adapter's own handling is exercised
+    // rather than assumed.
+    publish(
+      DeviceMetric.chargingDuration,
+      chargingDuration,
+      when: chargingStartedAt ?? observed,
+    );
+  }
+  if (networkStatus != null) {
+    publish(
+      DeviceMetric.networkStatus,
+      networkStatus,
+      when: lastOnlineAt ?? observed,
+    );
+  }
+  if (screenState != null) publish(DeviceMetric.screenState, screenState);
+  if (activityState != null) publish(DeviceMetric.activityState, activityState);
+  if (availabilityState != null) {
+    publish(DeviceMetric.deviceAvailability, availabilityState);
+  }
+  if (lastActivityAt != null) {
+    publish(DeviceMetric.lastActivity, lastActivityAt, when: lastActivityAt);
+  }
+
+  return RemoteDeviceState(
+    pairId: testRuleScope.pairId,
+    ownerUserId: testPartnerUserId,
+    observations: Map<DeviceMetric, StateObservation<Object?>>.unmodifiable(
+      observations,
+    ),
+    schemaVersion: 1,
+    stateVersion: 1,
+    observedAt: observed,
+    lastOnlineAt: lastOnlineAt,
+    lastActivityAt: lastActivityAt,
+    chargingStartedAt: chargingStartedAt,
+    receivedAt: observed,
+    isFromCache: false,
+    location: latitude == null || longitude == null
+        ? null
+        : RemoteLocationState(
+            availability: CapabilityAvailability.available,
+            latitude: latitude,
+            longitude: longitude,
+            approximate: false,
+            distanceFromHomeKm: distanceFromHomeKm,
+            presence: presence,
+            observedAt: locationObservedAt ?? observed,
+          ),
+  );
+}
+
+/// The partner user id [testRuleScope] belongs to.
+const String testPartnerUserId = 'user-b';
 
 /// A stored rule owned by [testRuleScope].
 Rule testRule({

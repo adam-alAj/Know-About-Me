@@ -95,17 +95,17 @@ is planned. Requirement identifiers are the SRS identifiers
 | FR-027 Supported rule metrics | `rules` (`RuleMetric`) | 9 | Model |
 | FR-028 Rule operators | `rules` (`RuleOperator`) | 9 | Model |
 | FR-029 Rule actions | `rules` (`RuleActionType`) | 9 | Model + interpretations built by the evaluator |
-| FR-030 User-defined probability | `rules` (`RuleAction.probabilityPercent`) | 9 | Model + **tested**: rendered as "There is a N% possibility…", never as a measurement |
-| FR-031 Rule-generated messages | `rules` + `dashboard` | 9 | Model (template only) |
+| FR-030 User-defined probability | `rules` (`RuleAction.probabilityPercent`) | 9 / 15 | Model + **evaluated**: the engine renders "There is a N% possibility…" and the dashboard shows it as an explicitly labelled *user-defined* percentage, never as a measurement |
+| FR-031 Rule-generated messages | `rules` + `dashboard` | 9 / 15 | **Built**: `InterpretationBuilder` maps an evaluation to the user's own wording, `RuleInterpretationsSection` shows it on the reassurance dashboard |
 | FR-032 Rule conditions | `rules` | 14 | **Built**: type-safe metric/operator/value builder derived from the engine's metric catalogue, with ALL/ANY grouping |
 | FR-033 Rule persistence | `rules` data layer | 14 | **Built**: `RuleRepository` + `FirestoreRuleRepository` (`users/{uid}/rules`), owner-scoped and validated in the domain layer before saving |
 | FR-034 Rule enable / disable | `rules` | 14 | **Built**: enable/disable from the list and the builder; the evaluator never runs a disabled rule |
 | FR-035 Rule editing | `rules` | 14 | **Built**: whole-rule draft → validation → atomic update; id stable, version increments; exact-duplicate detection |
 | FR-036 Rule deletion | `rules` | 14 | **Built**: confirmed deletion that names the rule; disabled rules are never auto-deleted |
 | FR-037 Multiple rules | `rules` | 14 | **Built**: list, create and edit any number of rules, newest first |
-| FR-038 Rule precedence | `rules` + `dashboard` | 9–10 | Planned |
-| FR-039 Rule cooldown | `rules` (`Rule.isCoolingDownAt`) | 9 | Model + **evaluator**: a cooling-down match keeps its interpretation but does not notify |
-| FR-040 Rule re-triggering | `rules` | 9 | Model (cooldown basis) |
+| FR-038 Rule precedence | `rules` + `dashboard` | 9–10 | **Not implemented**: `RuleAction` has no priority field, so all matching rules are shown (deterministically ordered) rather than ranked |
+| FR-039 Rule cooldown | `rules` (`Rule.isCoolingDownAt`) | 9 / 15 | Model + **evaluator + UI**: a cooling-down match keeps its interpretation, stays visible, and reports `isNewMatch == false` |
+| FR-040 Rule re-triggering | `rules` | 9 / 15 | **Built**: `RuleTransition` (`becameMatched` / `stayedMatched` / `becameNotMatched` / indeterminate) so a continuously satisfied rule is never re-reported as new |
 
 ### Notifications
 
@@ -120,10 +120,10 @@ is planned. Requirement identifiers are the SRS identifiers
 
 | Req | Domain | Phase | Phase 1–2 status |
 | --- | --- | --- | --- |
-| FR-045 Partner overview | `dashboard` | 10 | Shell (route, layout, state handling) |
-| FR-046 Current status summary | `dashboard` | 10 | Shell |
-| FR-047 Data freshness | `core/freshness` + `core/ui` | 8 | Model (`FreshnessIndicator`) |
-| FR-048 Unknown state | `device_state` (`DataAvailability`) | 6–10 | Model + shell (`DataStateView`) |
+| FR-045 Partner overview | `dashboard` | 10 / 15 | Shell (route, layout, state handling) + **rule interpretations** with observed facts and "why this matched" |
+| FR-046 Current status summary | `dashboard` | 10 / 15 | Shell + **rule-based interpretation** of the currently authorized state |
+| FR-047 Data freshness | `core/freshness` + `core/ui` | 8 / 15 | Model (`FreshnessIndicator`) + **used per interpretation**, with a stale basis labelled rather than hidden |
+| FR-048 Unknown state | `device_state` (`DataAvailability`) | 6–10 / 15 | Model + shell (`DataStateView`) + **evaluation**: unknown, stale, unsupported and permission-denied inputs are never reported as matches |
 
 ### History
 

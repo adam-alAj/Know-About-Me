@@ -28,6 +28,7 @@ import '../../device_state/presentation/widgets/partner_sync_card.dart';
 import '../../pairing/domain/models/pair_membership.dart';
 import '../../pairing/presentation/providers/pairing_providers.dart';
 import '../../privacy/domain/models/sharing_category.dart';
+import '../../rules/presentation/widgets/rule_interpretations_section.dart';
 
 /// Partner-first dashboard over the authorized Phase 11 state stream.
 /// It contains no Firestore reads and never infers human behavior.
@@ -128,6 +129,12 @@ class _PartnerReassuranceDashboardState
                   now: now,
                   onRetry: () => ref.invalidate(partnerDeviceStateProvider),
                 ),
+              const SizedBox(height: AppSpacing.lg),
+              // Rule interpretations are derived from the same authorized state
+              // the panels above display, so they live here rather than in a
+              // separate screen: the facts and the user's reading of them stay
+              // side by side.
+              RuleInterpretationsSection(now: now),
               const SizedBox(height: AppSpacing.lg),
               AppButton.secondary(
                 label: 'Manage connection and sharing',
