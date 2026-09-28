@@ -26,9 +26,11 @@ void main() {
       'Activity and availability (technical observations)',
     );
     final dashboardList = find.byType(ListView).first;
-    for (var attempt = 0;
-        attempt < 12 && observationHeading.evaluate().isEmpty;
-        attempt++) {
+    for (
+      var attempt = 0;
+      attempt < 12 && observationHeading.evaluate().isEmpty;
+      attempt++
+    ) {
       await tester.drag(dashboardList, const Offset(0, -300));
       await tester.pumpAndSettle();
     }
@@ -67,6 +69,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Privacy and sharing'), findsOneWidget);
-    expect(find.text('Location'), findsOneWidget);
+    expect(
+      find.text('No active connection. Nothing is shared.'),
+      findsOneWidget,
+    );
   });
 }

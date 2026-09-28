@@ -17,6 +17,7 @@ class DeviceStateSyncCoordinator {
 
   PartnerScope? _scope;
   PairSharingState _sharing = PairSharingState.none;
+  DeviceStateSnapshot? _latestSnapshot;
 
   /// The pair currently being synchronized, or `null`.
   PartnerScope? get scope => _scope;
@@ -33,13 +34,20 @@ class DeviceStateSyncCoordinator {
   Future<void> updateScope(PartnerScope? scope) async {
     if (scope == _scope) return;
     _scope = scope;
+    _latestSnapshot = null;
     await _service.reset();
   }
 
   /// Applies the owner's current sharing switches.
   void updateSharing(PairSharingState sharing) {
-    if (identical(sharing, _sharing)) return;
+    if (sharing.paused == _sharing.paused &&
+        sharing.categories.length == _sharing.categories.length &&
+        sharing.categories.containsAll(_sharing.categories)) {
+      return;
+    }
     _sharing = sharing;
+    final snapshot = _latestSnapshot;
+    if (snapshot != null) onLocalSnapshot(snapshot);
   }
 
   /// Offers a freshly observed local snapshot for publication.
@@ -47,6 +55,7 @@ class DeviceStateSyncCoordinator {
   /// Called on every local change; the service decides whether anything
   /// actually needs to be written.
   void onLocalSnapshot(DeviceStateSnapshot snapshot) {
+    _latestSnapshot = snapshot;
     final scope = _scope;
     if (scope == null) return;
     _service.requestPublish(
@@ -75,6 +84,7 @@ class DeviceStateSyncCoordinator {
   Future<void> stop() async {
     _scope = null;
     _sharing = PairSharingState.none;
+    _latestSnapshot = null;
     await _service.reset();
   }
 }

@@ -68,7 +68,12 @@ void main() {
           (_, _) {},
           fireImmediately: true,
         );
-        await Future<void>.delayed(const Duration(milliseconds: 20));
+        try {
+          await container.read(userProfileProvider('user-a').future);
+        } catch (_) {
+          // Wait for the provider's actual failure rather than guessing at a
+          // fixed scheduling delay.
+        }
 
         final presentation = PresentationMapping.fromAsyncNullableResult(
           container.read(currentUserProfileProvider),

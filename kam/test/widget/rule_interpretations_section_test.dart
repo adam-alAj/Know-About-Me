@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kam/app/providers.dart';
 import 'package:kam/core/time/clock.dart';
 import 'package:kam/features/device_state/domain/models/remote_device_state.dart';
+import 'package:kam/features/device_state/domain/models/pair_sharing_state.dart';
 import 'package:kam/features/device_state/presentation/providers/sync_providers.dart';
 import 'package:kam/features/rules/data/repositories/in_memory_rule_repository.dart';
 import 'package:kam/features/rules/domain/models/rule.dart';
@@ -15,6 +16,7 @@ import 'package:kam/features/rules/domain/rule_draft.dart';
 import 'package:kam/features/rules/presentation/providers/rule_providers.dart';
 import 'package:kam/features/rules/presentation/widgets/rule_interpretation_card.dart';
 import 'package:kam/features/rules/presentation/widgets/rule_interpretations_section.dart';
+import 'package:kam/features/privacy/domain/models/sharing_category.dart';
 
 import '../support/rule_test_app.dart';
 
@@ -80,6 +82,14 @@ void main() {
           ruleScopeProvider.overrideWithValue(
             const AsyncData<RuleScope?>(testRuleScope),
           ),
+          partnerSharingProvider.overrideWith(
+            (ref) => Stream.value(
+              const PairSharingState(
+                paused: false,
+                categories: {SharingCategory.battery, SharingCategory.charging},
+              ),
+            ),
+          ),
           partnerDeviceStateProvider.overrideWith(
             (ref) => Stream<PartnerDeviceState?>.value(
               partnerState == _unset
@@ -138,25 +148,25 @@ void main() {
     expect(find.text('Status'), findsOneWidget);
   });
 
-  testWidgets('an enabled rule that does not match shows nothing to interpret',
-      (tester) async {
-    await pumpSection(
-      tester,
-      seed: [
-        chargingRule(),
-      ],
-      partnerState: PartnerDeviceState(
-        testPartnerState(
-          chargingDuration: const Duration(minutes: 10),
-          chargingStartedAt: testNow.subtract(const Duration(minutes: 10)),
+  testWidgets(
+    'an enabled rule that does not match shows nothing to interpret',
+    (tester) async {
+      await pumpSection(
+        tester,
+        seed: [chargingRule()],
+        partnerState: PartnerDeviceState(
+          testPartnerState(
+            chargingDuration: const Duration(minutes: 10),
+            chargingStartedAt: testNow.subtract(const Duration(minutes: 10)),
+          ),
         ),
-      ),
-    );
+      );
 
-    expect(find.byType(RuleInterpretationCard), findsNothing);
-    expect(find.text('No rule applies right now'), findsOneWidget);
-    expect(find.text('Possible sleep period'), findsNothing);
-  });
+      expect(find.byType(RuleInterpretationCard), findsNothing);
+      expect(find.text('No rule applies right now'), findsOneWidget);
+      expect(find.text('Possible sleep period'), findsNothing);
+    },
+  );
 
   testWidgets('a disabled rule produces no interpretation', (tester) async {
     await pumpSection(tester, seed: [chargingRule(enabled: false)]);
@@ -165,8 +175,9 @@ void main() {
     expect(find.text('No rule applies right now'), findsOneWidget);
   });
 
-  testWidgets('no authorized partner state is explained, not left blank',
-      (tester) async {
+  testWidgets('no authorized partner state is explained, not left blank', (
+    tester,
+  ) async {
     await pumpSection(tester, seed: [chargingRule()], partnerState: null);
 
     expect(find.byType(RuleInterpretationCard), findsNothing);
@@ -176,13 +187,9 @@ void main() {
   testWidgets('a rule that cannot be decided is shown as such', (tester) async {
     await pumpSection(
       tester,
-      seed: [
-        chargingRule(),
-      ],
+      seed: [chargingRule()],
       // Nothing but a battery reading, so the charging duration is unknown.
-      partnerState: PartnerDeviceState(
-        testPartnerState(batteryPercentage: 60),
-      ),
+      partnerState: PartnerDeviceState(testPartnerState(batteryPercentage: 60)),
     );
 
     expect(find.byType(RuleInterpretationCard), findsOneWidget);
@@ -191,13 +198,12 @@ void main() {
     expect(find.text('Based on your rule'), findsNothing);
   });
 
-  testWidgets('unknown data is explained as unknown, not as a system failure',
-      (tester) async {
+  testWidgets('unknown data is explained as unknown, not as a system failure', (
+    tester,
+  ) async {
     await pumpSection(
       tester,
-      seed: [
-        chargingRule(name: 'Left home'),
-      ],
+      seed: [chargingRule(name: 'Left home')],
       // No location document at all.
       partnerState: PartnerDeviceState(testPartnerState()),
     );
@@ -218,15 +224,13 @@ void main() {
       settle: false,
     );
 
-    expect(
-      find.text(RuleInterpretationsSection.loadingLabel),
-      findsOneWidget,
-    );
+    expect(find.text(RuleInterpretationsSection.loadingLabel), findsOneWidget);
     expect(find.byType(RuleInterpretationCard), findsNothing);
   });
 
-  testWidgets('reports a failed rule read without inventing interpretations',
-      (tester) async {
+  testWidgets('reports a failed rule read without inventing interpretations', (
+    tester,
+  ) async {
     await pumpSection(
       tester,
       seed: const <Rule>[],
@@ -239,13 +243,12 @@ void main() {
     expect(find.byType(RuleInterpretationCard), findsNothing);
   });
 
-  testWidgets('a stale snapshot is labelled rather than presented as current',
-      (tester) async {
+  testWidgets('a stale snapshot is labelled rather than presented as current', (
+    tester,
+  ) async {
     await pumpSection(
       tester,
-      seed: [
-        chargingRule(),
-      ],
+      seed: [chargingRule()],
       partnerState: PartnerDeviceState(
         testPartnerState(
           observedAt: testNow.subtract(const Duration(hours: 3)),
@@ -258,10 +261,7 @@ void main() {
     );
 
     expect(find.byType(RuleInterpretationCard), findsOneWidget);
-    expect(
-      find.textContaining('no longer current'),
-      findsWidgets,
-    );
+    expect(find.textContaining('no longer current'), findsWidgets);
   });
 
   testWidgets('survives a narrow surface without overflowing', (tester) async {

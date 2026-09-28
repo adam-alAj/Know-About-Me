@@ -81,10 +81,7 @@ void main() {
           (ref) => Stream.value(
             const PairSharingState(
               paused: false,
-              categories: {
-                SharingCategory.battery,
-                SharingCategory.charging,
-              },
+              categories: {SharingCategory.battery, SharingCategory.charging},
             ),
           ),
         ),
@@ -101,7 +98,9 @@ void main() {
     );
   }
 
-  testWidgets('a matching rule is interpreted on the dashboard', (tester) async {
+  testWidgets('a matching rule is interpreted on the dashboard', (
+    tester,
+  ) async {
     await pumpDashboard(
       tester,
       seed: [longCharging()],
@@ -124,8 +123,9 @@ void main() {
     );
   });
 
-  testWidgets('the interpretation never states a verified behaviour',
-      (tester) async {
+  testWidgets('the interpretation never states a verified behaviour', (
+    tester,
+  ) async {
     await pumpDashboard(
       tester,
       seed: [longCharging()],
@@ -143,8 +143,9 @@ void main() {
     }
   });
 
-  testWidgets('a disabled rule is stored but produces no interpretation',
-      (tester) async {
+  testWidgets('a disabled rule is stored but produces no interpretation', (
+    tester,
+  ) async {
     await pumpDashboard(
       tester,
       seed: [longCharging(enabled: false)],
@@ -156,8 +157,9 @@ void main() {
     expect(find.text('Possible sleep period'), findsNothing);
   });
 
-  testWidgets('a rule that does not match yet is not interpreted',
-      (tester) async {
+  testWidgets('a rule that does not match yet is not interpreted', (
+    tester,
+  ) async {
     await pumpDashboard(
       tester,
       seed: [longCharging()],
@@ -168,7 +170,9 @@ void main() {
     expect(find.text('No rule applies right now'), findsOneWidget);
   });
 
-  testWidgets('an ended pair stops partner-state interpretation', (tester) async {
+  testWidgets('an ended pair stops partner-state interpretation', (
+    tester,
+  ) async {
     await pumpDashboard(
       tester,
       seed: [longCharging()],
@@ -182,8 +186,9 @@ void main() {
     expect(find.text('Connection unavailable'), findsOneWidget);
   });
 
-  testWidgets('no rules for this member means nothing to interpret',
-      (tester) async {
+  testWidgets('no rules for this member means nothing to interpret', (
+    tester,
+  ) async {
     // No rule scope at all: there is no rule set to evaluate for this member.
     useTallSurface(tester);
     await pumpTestApp(
@@ -216,13 +221,11 @@ void main() {
             PartnerDeviceState(chargingFor(const Duration(minutes: 250))),
           ),
         ),
-        ruleScopeProvider.overrideWithValue(
-          const AsyncData<RuleScope?>(null),
-        ),
+        ruleScopeProvider.overrideWithValue(const AsyncData<RuleScope?>(null)),
       ],
     );
 
     expect(find.byType(RuleInterpretationCard), findsNothing);
-    expect(find.text('No rule applies right now'), findsOneWidget);
+    expect(find.text('Nothing to interpret yet'), findsOneWidget);
   });
 }

@@ -5,6 +5,7 @@ import 'package:kam/features/pairing/domain/models/consent.dart';
 import 'package:kam/features/pairing/domain/models/pair.dart';
 import 'package:kam/features/privacy/domain/models/sharing_category.dart';
 import 'package:kam/features/privacy/domain/models/sharing_preferences.dart';
+import 'package:kam/features/device_state/domain/models/pair_sharing_state.dart';
 
 void main() {
   final now = DateTime.utc(2026, 9, 26, 12);
@@ -41,6 +42,12 @@ void main() {
       );
       expect(
         PairLifecycleState.revoked.canTransitionTo(PairLifecycleState.active),
+        isFalse,
+      );
+      expect(
+        PairLifecycleState.disconnected.canTransitionTo(
+          PairLifecycleState.active,
+        ),
         isFalse,
       );
       expect(
@@ -148,6 +155,39 @@ void main() {
 
       expect(withoutBattery.isCategoryShared(SharingCategory.battery), isFalse);
       expect(withoutBattery.sharingPaused, isFalse);
+    });
+  });
+
+  group('Pair sharing authorization', () {
+    test('defaults fail closed and do not enable categories', () {
+      expect(PairSharingState.none.sharesAnything, isFalse);
+      expect(PairSharingState.none.shares(SharingCategory.location), isFalse);
+    });
+
+    test('pause retains selections but withholds them until resumed', () {
+      const paused = PairSharingState(
+        paused: true,
+        categories: {SharingCategory.battery, SharingCategory.location},
+      );
+      const resumed = PairSharingState(
+        paused: false,
+        categories: {SharingCategory.battery, SharingCategory.location},
+      );
+
+      expect(paused.shares(SharingCategory.location), isFalse);
+      expect(resumed.shares(SharingCategory.location), isTrue);
+      expect(resumed.shares(SharingCategory.activityIndicators), isFalse);
+    });
+
+    test('cache-only settings are marked as unconfirmed authorization', () {
+      const cached = PairSharingState(
+        paused: false,
+        categories: {SharingCategory.battery},
+        isFromCache: true,
+      );
+
+      expect(cached.isFromCache, isTrue);
+      expect(cached.shares(SharingCategory.battery), isTrue);
     });
   });
 

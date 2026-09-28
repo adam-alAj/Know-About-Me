@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../core/domain/device_metric.dart';
+import '../../../privacy/domain/models/sharing_category.dart';
 
 import '../../../../app/providers.dart';
 import '../../../../core/firebase/firebase_providers.dart';
@@ -13,6 +15,7 @@ import '../../data/sync/device_state_sync_coordinator.dart';
 import '../../data/sync/firestore_device_state_sync_gateway.dart';
 import '../../domain/models/pair_sharing_state.dart';
 import '../../domain/models/remote_device_state.dart';
+import '../../domain/models/state_observation.dart';
 import '../../domain/repositories/partner_device_state_repository.dart';
 import '../../domain/repositories/sharing_repository.dart';
 import '../../domain/services/device_state_sanitizer.dart';
@@ -77,10 +80,7 @@ final partnerSharingProvider = StreamProvider<PairSharingState>((ref) {
   if (scope == null || repository == null) {
     return Stream<PairSharingState>.value(PairSharingState.none);
   }
-  return repository.watch(
-    pairId: scope.pairId,
-    userId: scope.partnerUserId,
-  );
+  return repository.watch(pairId: scope.pairId, userId: scope.partnerUserId);
 });
 
 /// Reads the authorized partner's synchronized state.
@@ -110,6 +110,90 @@ final partnerDeviceStateProvider = StreamProvider<PartnerDeviceState?>((ref) {
   );
 });
 
+/// Partner state after applying the latest authorization document. Firestore
+/// Rules prevent future unauthorized reads; this projection also removes data
+/// already held in the local stream/cache as soon as sharing changes.
+final authorizedPartnerDeviceStateProvider =
+    Provider<AsyncValue<PartnerDeviceState?>>((ref) {
+      final state = ref.watch(partnerDeviceStateProvider);
+      final sharing = ref.watch(partnerSharingProvider);
+      final access = sharing.asData?.value;
+      if (access == null ||
+          access.paused ||
+          access.isFromCache ||
+          !access.sharesAnything) {
+        return const AsyncData<PartnerDeviceState?>(null);
+      }
+      return state.whenData((partner) {
+        if (partner == null) return null;
+        final original = partner.state;
+        final observations = <DeviceMetric, StateObservation<Object?>>{};
+        for (final entry in original.observations.entries) {
+          final category = switch (entry.key) {
+            DeviceMetric.batteryPercentage => SharingCategory.battery,
+            DeviceMetric.chargingState ||
+            DeviceMetric.chargingDuration ||
+            DeviceMetric.chargingSource => SharingCategory.charging,
+            DeviceMetric.networkStatus => SharingCategory.network,
+            DeviceMetric.screenState ||
+            DeviceMetric.activityState ||
+            DeviceMetric.lastActivity => SharingCategory.activityIndicators,
+            DeviceMetric.deviceAvailability => null,
+            _ => null,
+          };
+          if ((category != null && access.shares(category)) ||
+              (entry.key == DeviceMetric.deviceAvailability &&
+                  (access.shares(SharingCategory.battery) ||
+                      access.shares(SharingCategory.charging) ||
+                      access.shares(SharingCategory.network) ||
+                      access.shares(SharingCategory.activityIndicators)))) {
+            observations[entry.key] = entry.value;
+          }
+        }
+        final includeLocation = access.shares(SharingCategory.location);
+        final location = original.location;
+        final filteredLocation = !includeLocation || location == null
+            ? null
+            : RemoteLocationState(
+                availability: location.availability,
+                latitude: location.latitude,
+                longitude: location.longitude,
+                accuracyMeters: location.accuracyMeters,
+                approximate: location.approximate,
+                distanceFromHomeKm:
+                    access.shares(SharingCategory.distanceFromHome)
+                    ? location.distanceFromHomeKm
+                    : null,
+                presence: access.shares(SharingCategory.distanceFromHome)
+                    ? location.presence
+                    : null,
+                observedAt: location.observedAt,
+              );
+        return PartnerDeviceState(
+          RemoteDeviceState(
+            pairId: original.pairId,
+            ownerUserId: original.ownerUserId,
+            observations: observations,
+            schemaVersion: original.schemaVersion,
+            receivedAt: original.receivedAt,
+            isFromCache: original.isFromCache,
+            deviceId: original.deviceId,
+            stateVersion: original.stateVersion,
+            observedAt: original.observedAt,
+            synchronizedAt: original.synchronizedAt,
+            lastOnlineAt: original.lastOnlineAt,
+            lastActivityAt: access.shares(SharingCategory.activityIndicators)
+                ? original.lastActivityAt
+                : null,
+            chargingStartedAt: access.shares(SharingCategory.charging)
+                ? original.chargingStartedAt
+                : null,
+            location: filteredLocation,
+          ),
+        );
+      });
+    });
+
 /// The outcome of each completed synchronization run.
 final deviceStateSyncResultsProvider = StreamProvider<List<SyncOutcome>>((ref) {
   final service = ref.watch(deviceStateSyncServiceProvider);
@@ -122,27 +206,31 @@ final deviceStateSyncResultsProvider = StreamProvider<List<SyncOutcome>>((ref) {
 /// Instantiated (watched) from the application root so it lives exactly as long
 /// as the app does. It is inert without an authorized pair: no pair means no
 /// writes and no partner listener.
-final deviceStateSyncCoordinatorProvider = Provider<DeviceStateSyncCoordinator?>(
-  (ref) {
-    final service = ref.watch(deviceStateSyncServiceProvider);
-    if (service == null) return null;
+final deviceStateSyncCoordinatorProvider =
+    Provider<DeviceStateSyncCoordinator?>((ref) {
+      final service = ref.watch(deviceStateSyncServiceProvider);
+      if (service == null) return null;
 
-    final coordinator = DeviceStateSyncCoordinator(service);
-    ref.onDispose(() => unawaited(coordinator.stop()));
+      final coordinator = DeviceStateSyncCoordinator(service);
+      ref.onDispose(() => unawaited(coordinator.stop()));
 
-    ref.listen(partnerScopeProvider, (_, next) {
-      unawaited(coordinator.updateScope(next.value));
-    }, fireImmediately: true);
+      ref.listen(partnerScopeProvider, (_, next) {
+        unawaited(coordinator.updateScope(next.value));
+      }, fireImmediately: true);
 
-    ref.listen(ownSharingProvider, (_, next) {
-      coordinator.updateSharing(next.value ?? PairSharingState.none);
-    }, fireImmediately: true);
+      ref.listen(ownSharingProvider, (_, next) {
+        final configured = next.asData?.value;
+        coordinator.updateSharing(
+          configured == null || configured.isFromCache
+              ? PairSharingState.none
+              : configured,
+        );
+      }, fireImmediately: true);
 
-    ref.listen(monitoredDeviceStateProvider, (_, next) {
-      final snapshot = next.value;
-      if (snapshot != null) coordinator.onLocalSnapshot(snapshot);
+      ref.listen(monitoredDeviceStateProvider, (_, next) {
+        final snapshot = next.value;
+        if (snapshot != null) coordinator.onLocalSnapshot(snapshot);
+      });
+
+      return coordinator;
     });
-
-    return coordinator;
-  },
-);

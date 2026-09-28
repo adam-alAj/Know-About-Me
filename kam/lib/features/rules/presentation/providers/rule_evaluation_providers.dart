@@ -120,7 +120,7 @@ class RuleEvaluationController extends Notifier<RuleEvaluationState> {
     ref.onDispose(_cancelTimer);
 
     final rulesAsync = ref.watch(rulesControllerProvider);
-    final partnerAsync = ref.watch(partnerDeviceStateProvider);
+    final partnerAsync = ref.watch(authorizedPartnerDeviceStateProvider);
     final rules = rulesAsync.value;
 
     if (rules == null) {
@@ -134,10 +134,7 @@ class RuleEvaluationController extends Notifier<RuleEvaluationState> {
       return RuleEvaluationState.loading;
     }
 
-    return _evaluate(
-      rules: rules,
-      partnerState: partnerAsync.value?.state,
-    );
+    return _evaluate(rules: rules, partnerState: partnerAsync.value?.state);
   }
 
   /// Re-runs the cycle against the state already loaded.
@@ -147,7 +144,7 @@ class RuleEvaluationController extends Notifier<RuleEvaluationState> {
   void reevaluate() {
     state = _evaluate(
       rules: ref.read(rulesControllerProvider).value ?? const <Rule>[],
-      partnerState: ref.read(partnerDeviceStateProvider).value?.state,
+      partnerState: ref.read(authorizedPartnerDeviceStateProvider).value?.state,
     );
   }
 

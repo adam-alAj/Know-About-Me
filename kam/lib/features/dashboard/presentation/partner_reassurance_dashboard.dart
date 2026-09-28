@@ -69,7 +69,7 @@ class _PartnerReassuranceDashboardState
     final scope = scopeAsync.value;
     final now = _now;
     final titleName = ref.watch(partnerDisplayNameProvider).value;
-    final partnerState = ref.watch(partnerDeviceStateProvider);
+    final partnerState = ref.watch(authorizedPartnerDeviceStateProvider);
     final partnerSharing = ref.watch(partnerSharingProvider);
 
     final membership = _membershipFor(memberships.value, scope);
@@ -219,7 +219,8 @@ class _LocalDeviceOverview extends ConsumerWidget {
           child: battery.when(
             data: (state) => _LocalBatterySummary(state: state, now: now),
             loading: () => const Text('Reading local battery state…'),
-            error: (_, _) => const Text('Battery state temporarily unavailable.'),
+            error: (_, _) =>
+                const Text('Battery state temporarily unavailable.'),
           ),
         ),
         const SizedBox(height: AppSpacing.sm),
@@ -227,7 +228,8 @@ class _LocalDeviceOverview extends ConsumerWidget {
           child: network.when(
             data: (state) => _LocalNetworkSummary(state: state, now: now),
             loading: () => const Text('Reading local network state…'),
-            error: (_, _) => const Text('Network state temporarily unavailable.'),
+            error: (_, _) =>
+                const Text('Network state temporarily unavailable.'),
           ),
         ),
         const SizedBox(height: AppSpacing.sm),
@@ -249,17 +251,27 @@ class _LocalBatterySummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final charge = state.chargingState;
-    final charging = charge.value == BatteryChargingState.charging ||
+    final charging =
+        charge.value == BatteryChargingState.charging ||
         charge.value == BatteryChargingState.full;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Battery & charging', style: Theme.of(context).textTheme.titleMedium),
-        Text('Battery: ${_localObservation(state.percentage, (value) => '$value%')}'),
+        Text(
+          'Battery & charging',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        Text(
+          'Battery: ${_localObservation(state.percentage, (value) => '$value%')}',
+        ),
         Text('Charging: ${_localObservation(charge, _batteryChargeLabel)}'),
         if (charging)
-          Text('Charging duration: ${_localObservation(state.chargingDuration, _durationText)}'),
-        Text('Updated: ${_relative(state.percentage.observedAt ?? charge.observedAt, now)}'),
+          Text(
+            'Charging duration: ${_localObservation(state.chargingDuration, _durationText)}',
+          ),
+        Text(
+          'Updated: ${_relative(state.percentage.observedAt ?? charge.observedAt, now)}',
+        ),
         Text('Freshness: ${_freshnessLabel(state.freshnessAt(now))}'),
       ],
     );
@@ -276,8 +288,12 @@ class _LocalNetworkSummary extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       Text('Network', style: Theme.of(context).textTheme.titleMedium),
-      Text('Connection: ${_localObservation(state.connectivity, _connectivityText)}'),
-      Text('Internet access: ${_localObservation(state.internet, _internetText)}'),
+      Text(
+        'Connection: ${_localObservation(state.connectivity, _connectivityText)}',
+      ),
+      Text(
+        'Internet access: ${_localObservation(state.internet, _internetText)}',
+      ),
       Text('Status: ${_localObservation(state.status, _networkStatusText)}'),
       Text('Last online: ${_relative(state.lastOnlineAt, now)}'),
       Text('Freshness: ${_freshnessLabel(state.freshnessAt(now))}'),
@@ -302,7 +318,8 @@ class _PartnerHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final freshness = state?.observationFreshnessAt(now) ?? DataFreshness.unknown;
+    final freshness =
+        state?.observationFreshnessAt(now) ?? DataFreshness.unknown;
     final observedAt = state?.observedAt;
     return AppCard(
       semanticLabel: '$name, connected partner',
@@ -320,9 +337,11 @@ class _PartnerHeader extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(name, style: Theme.of(context).textTheme.titleLarge),
-                    Text(connectionFromCache
-                        ? 'Last known connection · checking status'
-                        : 'Connected'),
+                    Text(
+                      connectionFromCache
+                          ? 'Last known connection · checking status'
+                          : 'Connected',
+                    ),
                   ],
                 ),
               ),
@@ -393,19 +412,23 @@ class _PartnerContent extends StatelessWidget {
             ),
           ),
         stateAsync.when(
-      loading: () => const _LoadingPanel(),
-      error: (_, _) => _ErrorPanel(onRetry: onRetry),
-      data: (partner) {
-        if (partner == null) {
-          return const AppInlineMessage(
-            title: 'No device update yet',
-            message:
-                'There is no shared device state available at this time.',
-            tone: AppMessageTone.info,
-          );
-        }
-        return _PartnerMetrics(state: partner.state, sharing: sharing, now: now);
-      },
+          loading: () => const _LoadingPanel(),
+          error: (_, _) => _ErrorPanel(onRetry: onRetry),
+          data: (partner) {
+            if (partner == null) {
+              return const AppInlineMessage(
+                title: 'No device update yet',
+                message:
+                    'There is no shared device state available at this time.',
+                tone: AppMessageTone.info,
+              );
+            }
+            return _PartnerMetrics(
+              state: partner.state,
+              sharing: sharing,
+              now: now,
+            );
+          },
         ),
       ],
     );
@@ -444,7 +467,9 @@ class _PartnerMetrics extends StatelessWidget {
           rows: [
             _StateRow(
               'Availability',
-              _availabilityLabel(state.observation(DeviceMetric.deviceAvailability)),
+              _availabilityLabel(
+                state.observation(DeviceMetric.deviceAvailability),
+              ),
             ),
             _StateRow(
               'Last online',
@@ -463,8 +488,12 @@ class _PartnerMetrics extends StatelessWidget {
               if (canShowBattery)
                 _StateRow(
                   'Battery',
-                  _metric(state, DeviceMetric.batteryPercentage, now,
-                      suffix: '%'),
+                  _metric(
+                    state,
+                    DeviceMetric.batteryPercentage,
+                    now,
+                    suffix: '%',
+                  ),
                 ),
               if (canShowCharging)
                 _StateRow('Charging', _chargingLabel(charge)),
@@ -530,7 +559,10 @@ class _PartnerMetrics extends StatelessWidget {
             _StateRow(
               'Categories shared',
               sharing.categories
-                  .where((category) => category != SharingCategory.ruleInterpretations)
+                  .where(
+                    (category) =>
+                        category != SharingCategory.ruleInterpretations,
+                  )
                   .map(_categoryLabel)
                   .join(', '),
             ),
@@ -550,55 +582,80 @@ class _PartnerMetrics extends StatelessWidget {
     if (!canShowLocation) {
       rows.add(const _StateRow('Location', 'Not shared'));
     } else if (location == null || !location.hasCoordinates) {
-      rows.add(_StateRow(
-        'Location',
-        location == null ? 'Unavailable' : _availabilityLabel(
-          StateObservation<Object?>(availability: location.availability),
+      rows.add(
+        _StateRow(
+          'Location',
+          location == null
+              ? 'Unavailable'
+              : _availabilityLabel(
+                  StateObservation<Object?>(
+                    availability: location.availability,
+                  ),
+                ),
         ),
-      ));
+      );
     } else {
       final freshness = location.freshnessAt(now);
-      rows.add(_StateRow(
-        freshness == DataFreshness.stale ? 'Last known location' : 'Location',
-        freshness == DataFreshness.unknown
-            ? 'Update time unknown'
-            : 'Updated ${_relative(location.observedAt, now)} · ${_freshnessLabel(freshness)}',
-      ));
+      rows.add(
+        _StateRow(
+          freshness == DataFreshness.stale ? 'Last known location' : 'Location',
+          freshness == DataFreshness.unknown
+              ? 'Update time unknown'
+              : 'Updated ${_relative(location.observedAt, now)} · ${_freshnessLabel(freshness)}',
+        ),
+      );
       if (location.approximate) {
         rows.add(const _StateRow('Precision', 'Approximate'));
       }
       if (location.accuracyMeters != null) {
-        rows.add(_StateRow('Approximate accuracy', '±${location.accuracyMeters!.round()} m'));
+        rows.add(
+          _StateRow(
+            'Approximate accuracy',
+            '±${location.accuracyMeters!.round()} m',
+          ),
+        );
       }
     }
     if (canShowHome) {
       final distance = location?.distanceFromHomeKm;
       if (distance != null && location?.hasCoordinates == true) {
-        rows.add(_StateRow(
-          location!.freshnessAt(now) == DataFreshness.stale
-              ? 'Last known distance from home'
-              : 'Distance from home',
-          '${(distance * 1000).round()} m',
-        ));
+        rows.add(
+          _StateRow(
+            location!.freshnessAt(now) == DataFreshness.stale
+                ? 'Last known distance from home'
+                : 'Distance from home',
+            '${(distance * 1000).round()} m',
+          ),
+        );
       }
       final presence = location?.freshnessAt(now) == DataFreshness.stale
           ? 'stale'
           : location?.presence?.name;
-      rows.add(_StateRow('At home / away', switch (presence) {
-        'atHome' => 'At home',
-        'nearHome' => 'Near home',
-        'awayFromHome' => 'Away from home',
-        'stale' => 'Last known status is stale',
-        'unsupported' => 'Unsupported',
-        _ => 'Unknown',
-      }));
+      rows.add(
+        _StateRow('At home / away', switch (presence) {
+          'atHome' => 'At home',
+          'nearHome' => 'Near home',
+          'awayFromHome' => 'Away from home',
+          'stale' => 'Last known status is stale',
+          'unsupported' => 'Unsupported',
+          _ => 'Unknown',
+        }),
+      );
     }
-    return _StateCard(title: 'Location & home', icon: Icons.location_on_outlined, rows: rows);
+    return _StateCard(
+      title: 'Location & home',
+      icon: Icons.location_on_outlined,
+      rows: rows,
+    );
   }
 }
 
 class _StateCard extends StatelessWidget {
-  const _StateCard({required this.title, required this.icon, required this.rows});
+  const _StateCard({
+    required this.title,
+    required this.icon,
+    required this.rows,
+  });
 
   final String title;
   final IconData icon;
@@ -609,16 +666,26 @@ class _StateCard extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(children: [Icon(icon, semanticLabel: title), const SizedBox(width: AppSpacing.sm), Text(title, style: Theme.of(context).textTheme.titleMedium)]),
-        const SizedBox(height: AppSpacing.sm),
-        for (final row in rows) Padding(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Expanded(child: Text(row.label)),
+        Row(
+          children: [
+            Icon(icon, semanticLabel: title),
             const SizedBox(width: AppSpacing.sm),
-            Flexible(child: Text(row.value, textAlign: TextAlign.end)),
-          ]),
+            Text(title, style: Theme.of(context).textTheme.titleMedium),
+          ],
         ),
+        const SizedBox(height: AppSpacing.sm),
+        for (final row in rows)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: Text(row.label)),
+                const SizedBox(width: AppSpacing.sm),
+                Flexible(child: Text(row.value, textAlign: TextAlign.end)),
+              ],
+            ),
+          ),
       ],
     ),
   );
@@ -634,7 +701,13 @@ class _LoadingPanel extends StatelessWidget {
   const _LoadingPanel();
   @override
   Widget build(BuildContext context) => const AppCard(
-    child: Row(children: [CircularProgressIndicator(), SizedBox(width: AppSpacing.md), Text('Loading partner state…')]),
+    child: Row(
+      children: [
+        CircularProgressIndicator(),
+        SizedBox(width: AppSpacing.md),
+        Text('Loading partner state…'),
+      ],
+    ),
   );
 }
 
@@ -667,32 +740,41 @@ class _ConnectionEmptyState extends StatelessWidget {
     final title = pending
         ? 'Connection awaiting consent'
         : ended
-            ? 'Connection unavailable'
-            : 'No active connection';
+        ? 'Connection unavailable'
+        : 'No active connection';
     final message = pending
         ? 'Both people must consent before partner device details are available.'
         : ended
-            ? 'This connection has ended. Partner device details are no longer shown.'
-            : 'Connect with your partner to see the device information they choose to share.';
+        ? 'This connection has ended. Partner device details are no longer shown.'
+        : 'Connect with your partner to see the device information they choose to share.';
     return AppCard(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(title, style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: AppSpacing.sm),
-        Text(message),
-        const SizedBox(height: AppSpacing.md),
-        AppButton.secondary(
-          label: pending ? 'Review connection' : 'Connect with partner',
-          onPressed: () => context.pushNamed(AppRoutes.pairing),
-        ),
-      ]),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: AppSpacing.sm),
+          Text(message),
+          const SizedBox(height: AppSpacing.md),
+          AppButton.secondary(
+            label: pending ? 'Review connection' : 'Connect with partner',
+            onPressed: () => context.pushNamed(AppRoutes.pairing),
+          ),
+        ],
+      ),
     );
   }
 }
 
-String _metric(RemoteDeviceState state, DeviceMetric metric, DateTime now, {String suffix = ''}) {
+String _metric(
+  RemoteDeviceState state,
+  DeviceMetric metric,
+  DateTime now, {
+  String suffix = '',
+}) {
   final observation = state.observation(metric);
   final value = observation.value;
-  if (observation.availability != CapabilityAvailability.available || value == null) {
+  if (observation.availability != CapabilityAvailability.available ||
+      value == null) {
     return _availabilityLabel(observation);
   }
   final stale = observation.freshnessAt(now) == DataFreshness.stale;
@@ -700,7 +782,8 @@ String _metric(RemoteDeviceState state, DeviceMetric metric, DateTime now, {Stri
 }
 
 String _chargingLabel(StateObservation<Object?> observation) {
-  if (observation.availability != CapabilityAvailability.available || observation.value == null) {
+  if (observation.availability != CapabilityAvailability.available ||
+      observation.value == null) {
     return _availabilityLabel(observation);
   }
   return switch (observation.value) {
@@ -713,7 +796,8 @@ String _chargingLabel(StateObservation<Object?> observation) {
 }
 
 String _durationLabel(StateObservation<Object?> observation) {
-  if (observation.availability != CapabilityAvailability.available || observation.value is! Duration) {
+  if (observation.availability != CapabilityAvailability.available ||
+      observation.value is! Duration) {
     return _availabilityLabel(observation);
   }
   final duration = observation.value! as Duration;
@@ -723,11 +807,13 @@ String _durationLabel(StateObservation<Object?> observation) {
 }
 
 String _availabilityLabel(StateObservation<Object?> observation) {
-  if (observation.availability == CapabilityAvailability.available && observation.value != null) {
+  if (observation.availability == CapabilityAvailability.available &&
+      observation.value != null) {
     return _enumLabel('${observation.value}');
   }
   return switch (observation.availability) {
-    CapabilityAvailability.available || CapabilityAvailability.unknown => 'Unknown',
+    CapabilityAvailability.available ||
+    CapabilityAvailability.unknown => 'Unknown',
     CapabilityAvailability.unavailable => 'Unavailable or not shared',
     CapabilityAvailability.unsupported => 'Not available on this device',
     CapabilityAvailability.permissionDenied => 'Permission not granted',
@@ -738,7 +824,10 @@ String _availabilityLabel(StateObservation<Object?> observation) {
 }
 
 String _enumLabel(String value) => value
-    .replaceAllMapped(RegExp(r'([a-z])([A-Z])'), (match) => '${match[1]} ${match[2]}')
+    .replaceAllMapped(
+      RegExp(r'([a-z])([A-Z])'),
+      (match) => '${match[1]} ${match[2]}',
+    )
     .replaceAll('_', ' ')
     .replaceFirstMapped(RegExp(r'^.'), (match) => match[0]!.toUpperCase());
 
@@ -753,14 +842,19 @@ String _relative(DateTime? timestamp, DateTime now) {
   if (timestamp == null) return 'unknown';
   final age = now.toUtc().difference(timestamp.toUtc());
   if (age.isNegative || age.inSeconds < 60) return 'just now';
-  if (age.inMinutes < 60) return '${age.inMinutes} minute${age.inMinutes == 1 ? '' : 's'} ago';
-  if (age.inHours < 24) return '${age.inHours} hour${age.inHours == 1 ? '' : 's'} ago';
+  if (age.inMinutes < 60) {
+    return '${age.inMinutes} minute${age.inMinutes == 1 ? '' : 's'} ago';
+  }
+  if (age.inHours < 24) {
+    return '${age.inHours} hour${age.inHours == 1 ? '' : 's'} ago';
+  }
   final local = timestamp.toLocal();
   if (age.inDays == 1) return 'yesterday at ${_time(local)}';
   return '${age.inDays} days ago at ${_time(local)}';
 }
 
-String _time(DateTime local) => '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+String _time(DateTime local) =>
+    '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
 
 String _categoryLabel(SharingCategory category) => switch (category) {
   SharingCategory.battery => 'Battery',
@@ -782,7 +876,8 @@ String _localObservation<T>(
     return 'Unknown';
   }
   return switch (observation.availability) {
-    CapabilityAvailability.available || CapabilityAvailability.unknown => 'Unknown',
+    CapabilityAvailability.available ||
+    CapabilityAvailability.unknown => 'Unknown',
     CapabilityAvailability.unavailable => 'Unavailable',
     CapabilityAvailability.unsupported => 'Unsupported on this device',
     CapabilityAvailability.permissionDenied => 'Permission not granted',

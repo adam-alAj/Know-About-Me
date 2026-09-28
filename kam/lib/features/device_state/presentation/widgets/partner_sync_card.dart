@@ -174,7 +174,8 @@ class _SharingControls extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final sharing = ref.watch(ownSharingProvider).value ?? PairSharingState.none;
+    final sharing =
+        ref.watch(ownSharingProvider).value ?? PairSharingState.none;
     final owner = userId;
     final enabled = owner != null && !busy;
 
@@ -245,7 +246,7 @@ class _PartnerStateSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final partnerAsync = ref.watch(partnerDeviceStateProvider);
+    final partnerAsync = ref.watch(authorizedPartnerDeviceStateProvider);
     final now = ref.watch(clockProvider).nowUtc();
 
     return partnerAsync.when(
@@ -256,9 +257,7 @@ class _PartnerStateSection extends ConsumerWidget {
       ),
       data: (partner) {
         if (partner == null) {
-          return const Text(
-            'Your partner has not shared anything yet.',
-          );
+          return const Text('Your partner has not shared anything yet.');
         }
         final state = partner.state;
         final location = state.location;
@@ -267,11 +266,19 @@ class _PartnerStateSection extends ConsumerWidget {
           children: [
             const Text('Partner device'),
             Text('Availability: ${state.deviceAvailability.name}'),
-            Text('Battery: ${_observationSummary(state, DeviceMetric.batteryPercentage, (value) => '$value%')}'),
+            Text(
+              'Battery: ${_observationSummary(state, DeviceMetric.batteryPercentage, (value) => '$value%')}',
+            ),
             Text('Charging: ${_chargingSummary(state)}'),
-            Text('Network: ${_observationSummary(state, DeviceMetric.networkStatus, (value) => '$value')}'),
-            Text('Screen: ${_observationSummary(state, DeviceMetric.screenState, (value) => '$value')}'),
-            Text('Activity: ${_observationSummary(state, DeviceMetric.activityState, (value) => '$value')}'),
+            Text(
+              'Network: ${_observationSummary(state, DeviceMetric.networkStatus, (value) => '$value')}',
+            ),
+            Text(
+              'Screen: ${_observationSummary(state, DeviceMetric.screenState, (value) => '$value')}',
+            ),
+            Text(
+              'Activity: ${_observationSummary(state, DeviceMetric.activityState, (value) => '$value')}',
+            ),
             const SizedBox(height: AppSpacing.xs),
             if (location == null || !location.hasCoordinates)
               Text(
@@ -312,9 +319,7 @@ class _PartnerStateSection extends ConsumerWidget {
                 'Showing cached data: this is the last value this device '
                 'received, not proof of the current state.',
               ),
-            Text(
-              'Last confirmed online ${_relative(state.lastOnlineAt, now)}',
-            ),
+            Text('Last confirmed online ${_relative(state.lastOnlineAt, now)}'),
           ],
         );
       },
