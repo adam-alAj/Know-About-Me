@@ -1,3 +1,6 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+
 import '../error/app_failure.dart';
 import '../result/result.dart';
 
@@ -49,6 +52,11 @@ abstract interface class LocalNotificationService {
   /// silently doing nothing.
   bool get isSupported;
 
+  Future<Result<NotificationPermissionState>> permissionState();
+
+  /// Called only after an explicit user action, never during app startup.
+  Future<Result<NotificationPermissionState>> requestPermission();
+
   /// Raises (or replaces) a notification on this device.
   ///
   /// Returns a [Failure] rather than throwing when the capability is absent, so
@@ -57,6 +65,60 @@ abstract interface class LocalNotificationService {
 
   /// Removes all notifications raised by the application.
   Future<Result<void>> cancelAll();
+}
+
+enum NotificationPermissionState { granted, denied, notDetermined, unsupported }
+
+/// Android/iOS notification bridge. Rule logic remains in Dart; native code
+/// only asks permission and presents a local notification on this device.
+class MethodChannelLocalNotificationService implements LocalNotificationService {
+  const MethodChannelLocalNotificationService();
+  static const MethodChannel _channel = MethodChannel('kam/local_notifications');
+
+  @override
+  bool get isSupported => !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+       defaultTargetPlatform == TargetPlatform.iOS);
+
+  @override
+  Future<Result<NotificationPermissionState>> permissionState() =>
+      _permissionCall('permissionState');
+
+  @override
+  Future<Result<NotificationPermissionState>> requestPermission() =>
+      _permissionCall('requestPermission');
+
+  Future<Result<NotificationPermissionState>> _permissionCall(String method) async {
+    if (!isSupported) return const Success(NotificationPermissionState.unsupported);
+    return Result.guard<NotificationPermissionState>(() async {
+      final value = await _channel.invokeMethod<String>(method);
+      return NotificationPermissionState.values.firstWhere(
+        (state) => state.name == value,
+        orElse: () => NotificationPermissionState.denied,
+      );
+    });
+  }
+
+  @override
+  Future<Result<void>> show(LocalNotificationRequest request) async {
+    if (!isSupported) return const Failure(UnsupportedCapabilityFailure('Local notifications are unavailable on this platform.'));
+    return Result.guard<void>(() async {
+      await _channel.invokeMethod<void>('show', <String, Object?>{
+        'id': request.id,
+        'title': request.title,
+        'body': request.body,
+        'payload': request.payload,
+      });
+    });
+  }
+
+  @override
+  Future<Result<void>> cancelAll() async {
+    if (!isSupported) return const Success(null);
+    return Result.guard<void>(() async {
+      await _channel.invokeMethod<void>('cancelAll');
+    });
+  }
 }
 
 /// The honest default while no platform binding exists.
@@ -74,6 +136,14 @@ class UnavailableLocalNotificationService implements LocalNotificationService {
 
   @override
   bool get isSupported => false;
+
+  @override
+  Future<Result<NotificationPermissionState>> permissionState() async =>
+      const Success(NotificationPermissionState.unsupported);
+
+  @override
+  Future<Result<NotificationPermissionState>> requestPermission() async =>
+      const Success(NotificationPermissionState.unsupported);
 
   @override
   Future<Result<void>> show(LocalNotificationRequest request) async {

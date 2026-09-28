@@ -1,11 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/providers.dart';
+import '../../../../core/notifications/local_notification_service.dart';
 import '../../../../core/constants/app_spacing.dart';
 import '../../../../core/ui/widgets/app_inline_message.dart';
 import '../../../../core/ui/widgets/loading_view.dart';
 import '../../../../core/ui/widgets/section_header.dart';
+import '../../../auth/presentation/providers/auth_providers.dart';
+import '../../../auth/domain/models/user_preferences.dart';
+import '../../../notifications/domain/rule_notification_planner.dart';
 import '../providers/rule_evaluation_providers.dart';
 import 'rule_interpretation_card.dart';
 
@@ -44,6 +50,11 @@ class RuleInterpretationsSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(ruleEvaluationProvider);
+    ref.listen(ruleEvaluationProvider, (previous, next) {
+      if (next.hasPartnerState && !next.isLoading && !next.hasError) {
+        unawaited(_deliverNewMatches(ref, next));
+      }
+    });
     final current = now ?? ref.watch(clockProvider).nowUtc();
 
     return Column(
@@ -82,4 +93,43 @@ class RuleInterpretationsSection extends ConsumerWidget {
       ],
     );
   }
+
+  Future<void> _deliverNewMatches(WidgetRef ref, RuleEvaluationState state) async {
+    final preferences = ref.read(currentUserPreferencesProvider).value?.valueOrNull;
+    if (preferences == null ||
+        preferences.notificationPreference == NotificationPreference.noNotifications) return;
+    final service = ref.read(localNotificationServiceProvider);
+    final permission = await service.permissionState();
+    if (permission.valueOrNull != NotificationPermissionState.granted) return;
+    const planner = RuleNotificationPlanner();
+    for (final item in state.results) {
+      if (!item.rule.enabled || !item.isNewMatch || item.isBasedOnStaleData ||
+          item.observationTime == null) continue;
+      final key = '${item.ruleId}:v${item.ruleVersion}:${item.evaluation.evaluationId ?? item.evaluatedAt.toIso8601String()}';
+      final lastAlert = _lastAlertAt[item.ruleId] ?? item.rule.lastTriggeredAt;
+      if (lastAlert != null &&
+          item.evaluatedAt.toUtc().difference(lastAlert.toUtc()) < item.rule.cooldown) {
+        continue;
+      }
+      if (!_attemptedAlertKeys.add(key)) continue;
+      final plan = planner.plan(
+        rule: item.rule,
+        result: item.evaluation,
+        preference: preferences.notificationPreference,
+      );
+      if (!plan.shouldNotify) continue;
+      // Lock screen text stays generic: user-authored rules and partner details
+      // are shown only after the user opens the authorized app.
+      final delivery = await service.show(LocalNotificationRequest(
+        id: key,
+        title: 'Rule alert',
+        body: 'A rule you created matches shared device state. Open the app to review it.',
+        payload: item.ruleId,
+      ));
+      if (delivery.isSuccess) _lastAlertAt[item.ruleId] = item.evaluatedAt.toUtc();
+    }
+  }
 }
+
+final Set<String> _attemptedAlertKeys = <String>{};
+final Map<String, DateTime> _lastAlertAt = <String, DateTime>{};

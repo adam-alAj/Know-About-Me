@@ -43,7 +43,7 @@ final platformInfoProvider = Provider<PlatformInfo>(
 /// then the app must never claim it delivered an alert it did not
 /// (see `docs/architecture/SPARK_ONLY_ARCHITECTURE.md` §4).
 final localNotificationServiceProvider = Provider<LocalNotificationService>(
-  (ref) => const UnavailableLocalNotificationService(),
+  (ref) => const MethodChannelLocalNotificationService(),
 );
 
 /// The application logger.

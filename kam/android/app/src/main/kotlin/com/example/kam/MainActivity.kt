@@ -6,6 +6,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -28,6 +32,8 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private val notificationChannelName = "kam/local_notifications"
+    private var pendingNotificationPermissionResult: MethodChannel.Result? = null
     private val methodChannelName = "kam/device_battery"
     private val eventChannelName = "kam/device_battery/events"
     private val networkMethodChannelName = "kam/device_network"
@@ -70,6 +76,41 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kam/local_notifications")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "permissionState" -> result.success(notificationPermissionState())
+                    "requestPermission" -> {
+                        if (Build.VERSION.SDK_INT >= 33 &&
+                            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                            val asked = getSharedPreferences("kam_permissions", MODE_PRIVATE)
+                                .getBoolean("notification_asked", false)
+                            if (asked && !shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) {
+                                result.success("denied")
+                            } else {
+                                getSharedPreferences("kam_permissions", MODE_PRIVATE).edit()
+                                    .putBoolean("notification_asked", true).apply()
+                                pendingNotificationPermissionResult = result
+                                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7402)
+                            }
+                        } else result.success(notificationPermissionState())
+                    }
+                    "show" -> {
+                        if (Build.VERSION.SDK_INT >= 33 && notificationPermissionState() != "granted") {
+                            result.error("permission_denied", "Notification permission is not granted.", null)
+                        } else {
+                            showLocalNotification(call.argument<String>("id") ?: "alert", call.argument<String>("title") ?: "Rule alert", call.argument<String>("body") ?: "", call.argument<String>("payload"))
+                            result.success(null)
+                        }
+                    }
+                    "cancelAll" -> {
+                        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancelAll()
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, methodChannelName)
             .setMethodCallHandler { call, result ->
@@ -255,6 +296,32 @@ class MainActivity : FlutterActivity() {
             pendingLocationPermissionResult?.success(locationStatusMap())
             pendingLocationPermissionResult = null
         }
+        if (requestCode == 7402) {
+            pendingNotificationPermissionResult?.success(notificationPermissionState())
+            pendingNotificationPermissionResult = null
+        }
+    }
+
+    private fun notificationPermissionState(): String = when {
+        Build.VERSION.SDK_INT < 33 -> "granted"
+        checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED -> "granted"
+        getSharedPreferences("kam_permissions", MODE_PRIVATE).getBoolean("notification_asked", false) -> "denied"
+        else -> "notDetermined"
+    }
+
+    private fun showLocalNotification(id: String, title: String, body: String, ruleId: String?) {
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= 26) {
+            manager.createNotificationChannel(NotificationChannel(notificationChannelName, "Rule alerts", NotificationManager.IMPORTANCE_DEFAULT))
+        }
+        val intent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            if (ruleId != null) putExtra("ruleId", ruleId)
+        }
+        val pending = intent?.let { PendingIntent.getActivity(this, id.hashCode(), it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE) }
+        val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, notificationChannelName) else Notification.Builder(this)
+        builder.setSmallIcon(applicationInfo.icon).setContentTitle(title).setContentText(body)
+            .setStyle(Notification.BigTextStyle().bigText(body)).setAutoCancel(true).setContentIntent(pending)
+        manager.notify(id.hashCode(), builder.build())
     }
 
     override fun onDestroy() {

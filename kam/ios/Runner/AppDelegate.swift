@@ -1,5 +1,6 @@
 import CoreLocation
 import Flutter
+import UserNotifications
 import Network
 import UIKit
 
@@ -273,7 +274,7 @@ private func networkReading(_ path: NWPath) -> [String: String] {
 }
 
 @main
-@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate, UNUserNotificationCenterDelegate {
   /// Retained so Core Location delegate callbacks keep arriving.
   private var locationBridge: LocationBridge?
 
@@ -286,6 +287,57 @@ private func networkReading(_ path: NWPath) -> [String: String] {
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+
+    let notificationChannel = FlutterMethodChannel(
+      name: "kam/local_notifications",
+      binaryMessenger: engineBridge.pluginRegistry.registrar(forPlugin: "KamLocalNotifications")!.messenger()
+    )
+    notificationChannel.setMethodCallHandler { call, result in
+      let center = UNUserNotificationCenter.current()
+      switch call.method {
+      case "permissionState":
+        center.getNotificationSettings { settings in
+          let state: String
+          switch settings.authorizationStatus {
+          case .authorized, .provisional, .ephemeral: state = "granted"
+          case .notDetermined: state = "notDetermined"
+          default: state = "denied"
+          }
+          DispatchQueue.main.async { result(state) }
+        }
+      case "requestPermission":
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { _, error in
+          DispatchQueue.main.async {
+            if let error = error { result(FlutterError(code: "permission", message: "Notification permission could not be requested.", details: nil)); return }
+            center.getNotificationSettings { settings in
+              let allowed = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
+              DispatchQueue.main.async { result(allowed ? "granted" : "denied") }
+            }
+          }
+        }
+      case "show":
+        guard let args = call.arguments as? [String: Any],
+              let id = args["id"] as? String,
+              let title = args["title"] as? String,
+              let body = args["body"] as? String else {
+          result(FlutterError(code: "invalid_request", message: "Notification content is incomplete.", details: nil)); return
+        }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        if let ruleId = args["payload"] as? String { content.userInfo = ["ruleId": ruleId] }
+        center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil)) { error in
+          DispatchQueue.main.async { if error != nil { result(FlutterError(code: "delivery", message: "The notification could not be shown.", details: nil)) } else { result(nil) } }
+        }
+      case "cancelAll":
+        center.removeAllPendingNotificationRequests()
+        center.removeAllDeliveredNotifications()
+        result(nil)
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
+    UNUserNotificationCenter.current().delegate = self
 
     let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "KamBatteryChannel")!
     let methodChannel = FlutterMethodChannel(
@@ -361,5 +413,14 @@ private func networkReading(_ path: NWPath) -> [String: String] {
       binaryMessenger: registrar.messenger()
     )
     locationEventChannel.setStreamHandler(bridge)
+  }
+}
+
+extension AppDelegate {
+  func userNotificationCenter(_ center: UNUserNotificationCenter,
+                              willPresent notification: UNNotification,
+                              withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+    if #available(iOS 14.0, *) { completionHandler([.banner, .list, .sound]) }
+    else { completionHandler([.alert, .sound]) }
   }
 }

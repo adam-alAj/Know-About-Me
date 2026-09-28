@@ -49,6 +49,13 @@ void main() {
 
       expect(result.isSuccess, isTrue);
     });
+
+    test('permission operations report unsupported without prompting', () async {
+      expect((await service.permissionState()).valueOrNull,
+          NotificationPermissionState.unsupported);
+      expect((await service.requestPermission()).valueOrNull,
+          NotificationPermissionState.unsupported);
+    });
   });
 
   group('LocalNotificationRequest', () {

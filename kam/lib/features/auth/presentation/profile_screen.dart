@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/providers.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/error/app_failure.dart';
+import '../../../core/notifications/local_notification_service.dart';
 import '../../../core/ui/data_state_view.dart';
 import '../../../core/ui/presentation_mapping.dart';
 import '../../../core/ui/widgets/app_button.dart';
@@ -335,27 +336,51 @@ class _NotificationPreferenceSection extends ConsumerWidget {
 
     // A dropdown rather than radio tiles: no deprecated selection APIs, and it
     // stays a single accessible control at large text scales (NFR-028).
-    return DropdownButtonFormField<NotificationPreference>(
-      initialValue: preferences.notificationPreference,
-      decoration: const InputDecoration(
-        labelText: 'Notification preference',
-        border: OutlineInputBorder(),
-      ),
-      items: [
-        for (final preference in NotificationPreference.values)
-          DropdownMenuItem<NotificationPreference>(
-            value: preference,
-            child: Text(_labelFor(preference)),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DropdownButtonFormField<NotificationPreference>(
+          initialValue: preferences.notificationPreference,
+          decoration: const InputDecoration(
+            labelText: 'Notification preference',
+            border: OutlineInputBorder(),
           ),
-      ],
-      onChanged: saving
-          ? null
-          : (selected) {
-              if (selected == null) return;
-              ref
-                  .read(profileControllerProvider.notifier)
-                  .setNotificationPreference(selected);
+          items: [
+            for (final preference in NotificationPreference.values)
+              DropdownMenuItem<NotificationPreference>(
+                value: preference,
+                child: Text(_labelFor(preference)),
+              ),
+          ],
+          onChanged: saving
+              ? null
+              : (selected) {
+                  if (selected == null) return;
+                  ref.read(profileControllerProvider.notifier)
+                      .setNotificationPreference(selected);
+                },
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Text('Notifications are checked only while the app is active. Permission is requested only when you choose below.',
+            style: Theme.of(context).textTheme.bodySmall),
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: TextButton.icon(
+            icon: const Icon(Icons.notifications_active_outlined),
+            label: const Text('Enable device notifications'),
+            onPressed: () async {
+              final outcome = await ref.read(localNotificationServiceProvider).requestPermission();
+              if (!context.mounted) return;
+              final state = outcome.valueOrNull;
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(state == NotificationPermissionState.granted
+                    ? 'Device notifications are enabled.'
+                    : 'Notifications are unavailable or denied. You can enable them in your device settings.'),
+              ));
             },
+          ),
+        ),
+      ],
     );
   }
 
