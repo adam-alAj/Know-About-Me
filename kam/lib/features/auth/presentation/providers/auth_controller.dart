@@ -148,6 +148,7 @@ class AuthController extends Notifier<AuthState> {
         // releases the signed-out user's profile and settings from memory.
         ref.invalidate(userProfileProvider);
         ref.invalidate(userPreferencesProvider);
+        _clearLocalSessionData();
       case Failure<void>(:final failure):
         // The provider still considers us signed in, so do not pretend otherwise.
         state = AuthAuthenticated(identity);
@@ -159,9 +160,22 @@ class AuthController extends Notifier<AuthState> {
   AuthService get _service => ref.read(authServiceProvider);
 
   void _onIdentity(AuthIdentity? identity) {
+    final hadIdentity = state.identity != null;
     state = identity == null
         ? const AuthUnauthenticated()
         : AuthAuthenticated(identity);
+    // A session can end without this device asking: the token can be revoked,
+    // expire, or the user can sign out elsewhere. Protected local state must not
+    // outlive the session either way (NFR-004).
+    if (identity == null && hadIdentity) _clearLocalSessionData();
+  }
+
+  /// Drops cached location, activity and history for the session that ended.
+  ///
+  /// Best effort and fire-and-forget: the local cache is a convenience, and a
+  /// storage failure must never block or reverse a sign-out.
+  void _clearLocalSessionData() {
+    unawaited(ref.read(sensitiveLocalDataProvider).clear());
   }
 
   void _onStreamError(Object error, StackTrace stackTrace) {

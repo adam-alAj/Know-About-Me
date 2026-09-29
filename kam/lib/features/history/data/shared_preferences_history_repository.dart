@@ -2,12 +2,17 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../../core/storage/sensitive_local_data.dart';
 import '../domain/models/device_event.dart';
 import '../domain/repositories/history_repository.dart';
 
 /// Offline history cache. It retains at most 500 events and 180 days.
+///
+/// The cache is **not** namespaced by user, so reads must always be scoped by
+/// `ownerUserId`. The provider layer does that, and the cache is additionally
+/// removed when a session ends (`LocalStorageKeys.clearedOnSignOut`).
 class SharedPreferencesHistoryRepository implements HistoryRepository {
-  static const _key = 'history_events_v1';
+  static const _key = LocalStorageKeys.history;
   static const maxEvents = 500;
   static const maxAge = Duration(days: 180);
   final DateTime Function() now;
@@ -35,11 +40,17 @@ class SharedPreferencesHistoryRepository implements HistoryRepository {
   }
 
   @override
-  Future<List<DeviceEvent>> page({EventCategory? category, int limit = 50, DateTime? before}) async {
+  Future<List<DeviceEvent>> page({
+    EventCategory? category,
+    String? ownerUserId,
+    int limit = 50,
+    DateTime? before,
+  }) async {
     await _pendingWrites;
     final prefs = await SharedPreferences.getInstance();
     final items = await _read(prefs);
     final selected = items.where((item) => (category == null || item.category == category) &&
+        (ownerUserId == null || item.ownerUserId == ownerUserId) &&
         (before == null || item.occurredAt.isBefore(before))).toList()
       ..sort(_compare);
     return selected.take(limit.clamp(1, maxEvents).toInt()).toList();

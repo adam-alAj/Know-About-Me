@@ -1,10 +1,11 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../../core/storage/sensitive_local_data.dart';
 import '../../domain/services/device_identity_store.dart';
 
 /// Persists the non-secret opaque ID in app-private preferences.
 class SharedPreferencesDeviceIdentityStore implements DeviceIdentityStore {
-  static const _key = 'device_state.opaque_device_id';
+  static const _key = LocalStorageKeys.deviceIdentity;
   Future<SharedPreferences> get _preferences => SharedPreferences.getInstance();
 
   @override

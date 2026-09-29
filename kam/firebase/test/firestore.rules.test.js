@@ -1564,3 +1564,228 @@ test('a partner cannot read the owner\'s rule definitions inside an active pair'
   // The owner can list their own.
   await assertSucceeds(getDocs(collection(as('uA'), 'users', 'uA', 'rules')));
 });
+
+// ==================== Phase 19: authorization hardening ======================
+// Executable specification of docs/security/SECURITY_AND_AUTHORIZATION.md.
+// Each test targets a specific threat (B, C, D, E, F, G, I, J, L, M, N).
+
+// ------------------------------------------- privilege fields on profiles --
+// Authorization is derived from Firestore relationships, never from a field a
+// client set on its own document (constraint: client claim != trusted fact).
+
+test('a profile cannot carry authorization-ish fields', async () => {
+  const db = as('uA');
+  for (const extra of [{ status: 'active' }, { activatedAt: ts() }, { isAdmin: true }, { isPartner: true }]) {
+    await assertFails(
+      updateDoc(doc(db, 'users', 'uA'), { ...extra, updatedAt: serverTimestamp() }),
+    );
+  }
+});
+
+// ------------------------------------------------------- sharing documents --
+// Threat F: a client must not be able to widen or backdate the authorization
+// document that the read rules consult.
+
+test('the owner can update their own sharing with a server timestamp', async () => {
+  await assertSucceeds(
+    updateDoc(doc(as('uA'), 'pairs', 'p1', 'sharing', 'uA'), {
+      paused: false,
+      categories: ['battery'],
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a sharing change cannot be backdated or padded with unknown fields', async () => {
+  const db = as('uA');
+  await assertFails(
+    updateDoc(doc(db, 'pairs', 'p1', 'sharing', 'uA'), {
+      categories: ['battery'],
+      updatedAt: ts(),
+    }),
+  );
+  await assertFails(
+    updateDoc(doc(db, 'pairs', 'p1', 'sharing', 'uA'), {
+      categories: ['battery'],
+      isAuthorized: true,
+      updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a paused owner cannot keep publishing state', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await seedSharing(context.firestore(), 'p1', 'uA', ['battery', 'network'], true);
+  });
+
+  await assertFails(
+    setDoc(doc(as('uA'), 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 50,
+    })),
+  );
+});
+
+// ------------------------------------------------------------ device records --
+// Threat E: a device id is a record key, never an authorization credential. A
+// member may register only their own device, and the document is a closed shape.
+
+test('a device record is bound to its owner and its path', async () => {
+  await assertFails(
+    setDoc(doc(as('uB'), 'pairs', 'p1', 'devices', 'devA'), {
+      ownerUserId: 'uA', deviceId: 'devA', platform: 'android', lastSeenAt: serverTimestamp(),
+    }),
+  );
+  await assertFails(
+    setDoc(doc(as('uA'), 'pairs', 'p1', 'devices', 'devA'), {
+      ownerUserId: 'uA', deviceId: 'devB', platform: 'android', lastSeenAt: serverTimestamp(),
+    }),
+  );
+  await assertSucceeds(
+    setDoc(doc(as('uA'), 'pairs', 'p1', 'devices', 'devA'), {
+      ownerUserId: 'uA', deviceId: 'devA', platform: 'android', lastSeenAt: serverTimestamp(),
+    }),
+  );
+});
+
+test('a device record cannot store hardware identifiers or extra fields', async () => {
+  await assertFails(
+    setDoc(doc(as('uA'), 'pairs', 'p1', 'devices', 'devX'), {
+      ownerUserId: 'uA', deviceId: 'devX', platform: 'android',
+      lastSeenAt: serverTimestamp(), serialNumber: 'IMEI-123', macAddress: 'aa:bb',
+    }),
+  );
+});
+
+test('a device record cannot be claimed by another member', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'pairs', 'p1', 'devices', 'devA'), {
+      ownerUserId: 'uA', deviceId: 'devA', platform: 'android', lastSeenAt: ts(),
+    });
+  });
+
+  // Ownership and platform are immutable, so a claim on someone else's device
+  // is rejected and only a refresh of the presence timestamp is accepted.
+  await assertFails(
+    updateDoc(doc(as('uA'), 'pairs', 'p1', 'devices', 'devA'), {
+      ownerUserId: 'uB', lastSeenAt: serverTimestamp(),
+    }),
+  );
+  await assertFails(
+    updateDoc(doc(as('uB'), 'pairs', 'p1', 'devices', 'devA'), {
+      lastSeenAt: serverTimestamp(),
+    }),
+  );
+  await assertSucceeds(
+    updateDoc(doc(as('uA'), 'pairs', 'p1', 'devices', 'devA'), {
+      lastSeenAt: serverTimestamp(),
+    }),
+  );
+});
+
+// -------------------------------------------------------- interpretations --
+// Threat L/M: an interpretation a partner can read is a closed, bounded shape.
+
+test('an interpretation cannot store fields outside the documented set', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await seedSharing(context.firestore(), 'p1', 'uA', [
+      'battery', 'network', 'ruleInterpretations',
+    ]);
+  });
+
+  const db = as('uA');
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'interpretations', 'i-extra'), {
+      ownerUserId: 'uA', ruleId: 'r1', message: 'ok', isUserDefined: true,
+      basis: [], producedAt: ts(), payload: { secret: true },
+    }),
+  );
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'interpretations', 'i-unbounded'), {
+      ownerUserId: 'uA', ruleId: 'r1', message: 'x'.repeat(501), isUserDefined: true,
+      basis: [], producedAt: ts(),
+    }),
+  );
+  await assertSucceeds(
+    setDoc(doc(db, 'pairs', 'p1', 'interpretations', 'i-ok'), {
+      ownerUserId: 'uA', ruleId: 'r1', message: 'ok', isUserDefined: true,
+      basis: [], producedAt: ts(),
+    }),
+  );
+});
+
+// ---------------------------------------------------------- notifications --
+
+test('a notification cannot carry fields outside the documented set', async () => {
+  await assertFails(
+    setDoc(doc(as('uA'), 'users', 'uA', 'notifications', 'extra'), {
+      recipientUserId: 'uA', pairId: 'p1', title: 'T', body: 'B',
+      category: 'system', read: false, delivered: false,
+      createdAt: serverTimestamp(), admin: true,
+    }),
+  );
+});
+
+// ------------------------------------------------- two-person pair invariant --
+// Threat I: a third account must never become a member of an existing pair.
+
+test('a pair cannot be created with more than two members', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await publishCode(context.firestore(), 'uA', CODE);
+  });
+
+  const db = as('uE');
+  await assertFails(runTransaction(db, async (tx) => {
+    const codeRef = doc(db, 'pairingCodes', CODE);
+    await tx.get(codeRef);
+    tx.update(codeRef, { usedByUserId: 'uE', usedAt: serverTimestamp(), status: 'consumed' });
+    tx.set(doc(db, 'pairs', 'three-members'), {
+      memberIds: ['uA', 'uE', 'uC'], status: 'pending', requestedBy: 'uE',
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      invitationCode: CODE, schemaVersion: 1,
+    });
+  }));
+});
+
+test('a member cannot add a third participant to an existing pair', async () => {
+  await assertFails(
+    updateDoc(doc(as('uA'), 'pairs', 'p1'), {
+      memberIds: ['uA', 'uB', 'uC'], updatedAt: serverTimestamp(),
+    }),
+  );
+});
+
+// ------------------------------------------------------------------ history --
+// Threat B/G/M: history is pair-scoped, append-only, and stops when the pair
+// stops. An ended pair cuts partner history access on the next request.
+
+test('unrelated users and ended pairs cannot read pair history', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'pairs', 'p1', 'events', 'e-history'), {
+      ownerUserId: 'uA', type: 'deviceWentOffline', category: 'network',
+      occurredAt: ts(), recordedAt: ts(), source: 'device', schemaVersion: 1,
+    });
+  });
+
+  await assertFails(getDoc(doc(as('uC'), 'pairs', 'p1', 'events', 'e-history')));
+  await assertSucceeds(getDoc(doc(as('uB'), 'pairs', 'p1', 'events', 'e-history')));
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await updateDoc(doc(context.firestore(), 'pairs', 'p1'), { status: 'revoked' });
+  });
+
+  // The partner loses access; the owner keeps their own records.
+  await assertFails(getDoc(doc(as('uB'), 'pairs', 'p1', 'events', 'e-history')));
+  await assertSucceeds(getDoc(doc(as('uA'), 'pairs', 'p1', 'events', 'e-history')));
+});
+
+test('a forged pair id cannot be used to read someone else\'s history', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'pairs', 'p2', 'events', 'e-p2'), {
+      ownerUserId: 'uC', type: 'deviceWentOffline', category: 'network',
+      occurredAt: ts(), recordedAt: ts(), source: 'device', schemaVersion: 1,
+    });
+  });
+
+  await assertFails(getDoc(doc(as('uA'), 'pairs', 'p2', 'events', 'e-p2')));
+  await assertFails(getDocs(collection(as('uA'), 'pairs', 'p2', 'events')));
+});

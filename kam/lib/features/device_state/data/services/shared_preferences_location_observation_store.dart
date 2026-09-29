@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../../core/storage/sensitive_local_data.dart';
 import '../../domain/models/device_location_state.dart';
 import '../../domain/services/location_observation_store.dart';
 
@@ -12,7 +13,7 @@ import '../../domain/services/location_observation_store.dart';
 /// read, so a restored fix reports its true age.
 class SharedPreferencesLocationObservationStore
     implements LocationObservationStore {
-  static const _lastKnownKey = 'device_state.last_known_location';
+  static const _lastKnownKey = LocalStorageKeys.lastKnownLocation;
 
   Future<SharedPreferences> get _preferences => SharedPreferences.getInstance();
 

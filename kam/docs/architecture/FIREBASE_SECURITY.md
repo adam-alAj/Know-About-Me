@@ -4,8 +4,13 @@ How authorization is enforced for the Mutual Device Presence & Reassurance
 System, and how it is verified.
 
 Rules live in `firebase/firestore.rules`; the data they protect is described in
-`FIRESTORE_DATA_MODEL.md`. The rules are backed by 70 emulator tests in
+`FIRESTORE_DATA_MODEL.md`. The rules are backed by 114 emulator tests in
 `firebase/test/firestore.rules.test.js`.
+
+> **Phase 19** hardened the rules and the client and produced the authoritative
+> threat model, enforcement matrix and test matrix in
+> [`../security/SECURITY_AND_AUTHORIZATION.md`](../security/SECURITY_AND_AUTHORIZATION.md).
+> This document remains the original Phase 3+ authorization narrative.
 
 ---
 
@@ -198,9 +203,11 @@ rules even if the binary is modified.
 ## 8. How the rules are verified
 
 `firebase/test/firestore.rules.test.js` runs against the Firestore Emulator with
-the real rules loaded. 31 tests, all passing:
+the real rules loaded. 114 tests, all passing. The table below is the original
+Phase 3 grouping; the authoritative, current scenario matrix is in
+[`../security/SECURITY_AND_AUTHORIZATION.md`](../security/SECURITY_AND_AUTHORIZATION.md) §18.
 
-| Required scenario | Tests |
+| Required scenario | Tests (original numbering) |
 | --- | --- |
 | Unauthenticated access denied | 1, 2 |
 | User isolation (A cannot read B's private data) | 3, 4, 5, 6 |
@@ -263,3 +270,20 @@ and 16 emulator tests cover them in
 5. **Rate limiting / abuse protection** needs trusted infrastructure if required.
 6. **Retention and deletion jobs** (NFR-031, NFR-032) are deferred to Phase 12;
    rules currently allow the owner to delete their own profile, state and location.
+
+### Resolved in Phase 19
+
+- **Rule definitions could not be written at all.** `ruleValid()` referenced
+  `request.resource.data.type`/`category`, which a rule document does not carry,
+  so every rule create/update failed with a rules evaluation error. The block was
+  removed and is covered by the emulator suite.
+- **`devices/{deviceId}`, `interpretations/{id}` and `notifications/{id}` now use
+  closed field sets** with type, range and length checks, immutable ownership, and
+  server-authoritative timestamps where they matter.
+- **`sharing` updates must carry `updatedAt == request.time`** and may not be
+  padded with extra fields.
+- **Protected local state is cleared at session end** and the local history cache
+  is read scoped by owner, so one account's cached data is never shown to another.
+- **The deployed `firestore.indexes.json` was missing the
+  `pairs(memberIds CONTAINS, status)` index** the profile-sync query needs; the
+  root and `firebase/` copies are now identical.

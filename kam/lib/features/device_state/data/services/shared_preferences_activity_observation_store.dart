@@ -1,10 +1,11 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../../core/storage/sensitive_local_data.dart';
 import '../../domain/services/activity_observation_store.dart';
 
 class SharedPreferencesActivityObservationStore
     implements ActivityObservationStore {
-  static const _lastObservedKey = 'device_state.last_observed_activity_at';
+  static const _lastObservedKey = LocalStorageKeys.lastObservedActivityAt;
 
   Future<SharedPreferences> get _preferences => SharedPreferences.getInstance();
 

@@ -1,5 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../../core/storage/sensitive_local_data.dart';
 import '../../domain/sources/sync_version_store.dart';
 
 /// Persists the monotonic synchronization version counter locally.
@@ -7,7 +8,7 @@ import '../../domain/sources/sync_version_store.dart';
 /// It is app-private bookkeeping, not a secret and not a credential: it only
 /// lets this device recognise its own older writes.
 class SharedPreferencesSyncVersionStore implements SyncVersionStore {
-  static const _key = 'device_state.sync_version';
+  static const _key = LocalStorageKeys.syncVersion;
 
   Future<SharedPreferences> get _preferences => SharedPreferences.getInstance();
 

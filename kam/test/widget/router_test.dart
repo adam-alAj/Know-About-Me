@@ -83,6 +83,7 @@ class _EmptyHistoryRepository implements HistoryRepository {
   @override
   Future<List<DeviceEvent>> page({
     EventCategory? category,
+    String? ownerUserId,
     int limit = 50,
     DateTime? before,
   }) async => const <DeviceEvent>[];

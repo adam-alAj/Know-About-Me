@@ -327,16 +327,6 @@ service cloud.firestore {
              'displayName', 'photoUrl', 'timeZone', 'createdAt', 'updatedAt'
            ])
         && request.resource.data.createdAt == resource.data.createdAt
-        && (
-             ('activatedAt' in resource.data.keys()
-               && request.resource.data.activatedAt == resource.data.activatedAt)
-             || (!('activatedAt' in resource.data.keys())
-               && (
-                    !('activatedAt' in request.resource.data.keys())
-                    || (request.resource.data.status == 'active'
-                      && request.resource.data.activatedAt == request.time)
-                  ))
-           )
         && request.resource.data.updatedAt == request.time
         && request.resource.data.displayName is string
         && request.resource.data.displayName.size() > 0
@@ -429,23 +419,11 @@ service cloud.firestore {
             && (!('conditionGroup' in request.resource.data)
                 || request.resource.data.conditionGroup is map)
             && request.resource.data.actions is list
-            // A user-configured percentage must never be stored as if measured.
             && request.resource.data.actions.size() <= 8
             && request.resource.data.schemaVersion == 1
-            && (
-              (request.resource.data.type in ['chargingStarted', 'chargingStopped']
-                && request.resource.data.category == 'charging')
-              || (request.resource.data.type in ['deviceWentOffline', 'deviceCameOnline', 'connectionChanged']
-                && request.resource.data.category == 'network')
-              || (request.resource.data.type == 'locationChangedSignificantly'
-                && request.resource.data.category == 'location')
-              || (request.resource.data.type in ['ruleActivated', 'ruleDeactivated', 'ruleBecameUnknown', 'interpretationGenerated']
-                && request.resource.data.category == 'rules')
-              || (request.resource.data.type in ['ruleNotificationGenerated', 'notificationSuppressed']
-                && request.resource.data.category == 'notifications')
-              || (request.resource.data.type == 'sharingPermissionChanged'
-                && request.resource.data.category == 'device')
-            )
+            // NOTE: event `type`/`category` validation belongs to the `events`
+            // collection, not here. A rule document carries neither field, so
+            // referencing them would make every rule write fail evaluation.
             && request.resource.data.keys().hasOnly(ruleKeys());
         }
 
@@ -481,12 +459,24 @@ service cloud.firestore {
         allow read: if isSelf(userId);
 
         allow create: if isSelf(userId)
+          // Closed field set: the record cannot be used as arbitrary storage in
+          // the owner's own (private) notification centre.
+          && request.resource.data.keys().hasOnly([
+               'recipientUserId', 'pairId', 'title', 'body', 'category',
+               'ruleId', 'read', 'delivered', 'createdAt'
+             ])
           && request.resource.data.recipientUserId == userId
           && request.resource.data.title is string
           && request.resource.data.title.size() > 0
           && request.resource.data.title.size() <= 120
           && request.resource.data.body is string
           && request.resource.data.body.size() <= 500
+          && (!('pairId' in request.resource.data)
+              || (request.resource.data.pairId is string
+                  && request.resource.data.pairId.size() <= 128))
+          && (!('ruleId' in request.resource.data)
+              || (request.resource.data.ruleId is string
+                  && request.resource.data.ruleId.size() <= 128))
           && request.resource.data.category in [
                'ruleInterpretation', 'deviceStateChange',
                'connectionChange', 'sharingChange', 'system'
@@ -707,24 +697,56 @@ service cloud.firestore {
 
         allow create, update: if isMember(pairId)
           && isSelf(sharingId)
+          && request.resource.data.keys().hasOnly([
+               'userId', 'pairId', 'paused', 'categories', 'updatedAt'
+             ])
           && request.resource.data.userId == sharingId
           && request.resource.data.pairId == pairId
           && request.resource.data.paused is bool
           && request.resource.data.categories is list
-          && request.resource.data.categories.hasOnly(validCategories());
+          && request.resource.data.categories.hasOnly(validCategories())
+          && request.resource.data.categories.size() <= 16
+          // Server-authored timestamp: a sharing change cannot be backdated.
+          && request.resource.data.updatedAt == request.time;
 
         allow delete: if false;
       }
 
       // --- registered devices ----------------------------------------------
       match /devices/{deviceId} {
+        // Device records are pair-scoped but owner-bound: the stored
+        // `ownerUserId` must equal the caller and the stored `deviceId` must
+        // equal the path segment, so a member cannot register a device under
+        // another member's identity or smuggle extra fields into a document a
+        // partner can read.
+        function deviceKeys() {
+          return ['ownerUserId', 'deviceId', 'platform', 'lastSeenAt', 'createdAt'];
+        }
+
         allow read: if isMember(pairId);
 
-        allow create, update: if isMember(pairId)
+        allow create: if isMember(pairId)
+          && request.resource.data.keys().hasOnly(deviceKeys())
           && request.resource.data.ownerUserId == uid()
           && request.resource.data.deviceId == deviceId
+          && request.resource.data.deviceId is string
+          && request.resource.data.deviceId.size() <= 64
           && request.resource.data.platform in ['android', 'ios']
-          && request.resource.data.lastSeenAt is timestamp;
+          && request.resource.data.lastSeenAt is timestamp
+          && request.resource.data.lastSeenAt <= request.time + duration.value(5, 'm')
+          && (!('createdAt' in request.resource.data)
+              || request.resource.data.createdAt == request.time);
+
+        // Ownership and platform are immutable, and a presence timestamp may
+        // never claim to be far in the future.
+        allow update: if isMember(pairId)
+          && request.resource.data.keys().hasOnly(deviceKeys())
+          && request.resource.data.ownerUserId == resource.data.ownerUserId
+          && request.resource.data.ownerUserId == uid()
+          && request.resource.data.deviceId == resource.data.deviceId
+          && request.resource.data.platform == resource.data.platform
+          && request.resource.data.lastSeenAt is timestamp
+          && request.resource.data.lastSeenAt <= request.time + duration.value(5, 'm');
 
         allow delete: if isMember(pairId)
           && resource.data.ownerUserId == uid();
@@ -806,9 +828,31 @@ service cloud.firestore {
                   )
              );
 
+        function interpretationKeys() {
+          return ['ownerUserId', 'ruleId', 'message', 'probabilityPercent',
+                  'basis', 'isUserDefined', 'producedAt', 'schemaVersion'];
+        }
+
         allow create: if isActivePair(pairId)
+          && request.resource.data.keys().hasOnly(interpretationKeys())
           && request.resource.data.ownerUserId == uid()
           && request.resource.data.isUserDefined == true
+          && request.resource.data.ruleId is string
+          && request.resource.data.ruleId.size() > 0
+          && request.resource.data.ruleId.size() <= 128
+          && request.resource.data.message is string
+          && request.resource.data.message.size() <= 500
+          && (!('probabilityPercent' in request.resource.data)
+              || (request.resource.data.probabilityPercent is int
+                  && request.resource.data.probabilityPercent >= 0
+                  && request.resource.data.probabilityPercent <= 100))
+          && (!('basis' in request.resource.data)
+              || (request.resource.data.basis is list
+                  && request.resource.data.basis.size() <= 16))
+          && (!('producedAt' in request.resource.data)
+              || request.resource.data.producedAt is timestamp)
+          && (!('schemaVersion' in request.resource.data)
+              || request.resource.data.schemaVersion == 1)
           && notPaused(pairId, uid())
           && shares(pairId, uid(), 'ruleInterpretations');
 

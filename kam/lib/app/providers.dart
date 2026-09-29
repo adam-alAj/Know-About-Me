@@ -5,6 +5,7 @@ import '../core/firebase/firebase_bootstrap.dart';
 import '../core/logging/app_logger.dart';
 import '../core/notifications/local_notification_service.dart';
 import '../core/platform/platform_info.dart';
+import '../core/storage/sensitive_local_data.dart';
 import '../core/time/clock.dart';
 
 /// The resolved application configuration.
@@ -44,6 +45,16 @@ final platformInfoProvider = Provider<PlatformInfo>(
 /// (see `docs/architecture/SPARK_ONLY_ARCHITECTURE.md` §4).
 final localNotificationServiceProvider = Provider<LocalNotificationService>(
   (ref) => const MethodChannelLocalNotificationService(),
+);
+
+/// Removes protected local state when an authenticated session ends.
+///
+/// Provided at the application root so the authentication layer can delete the
+/// cached location, activity and history it must not keep, without importing the
+/// feature stores that wrote them. See `LocalStorageKeys` for exactly what is
+/// removed — and what is deliberately kept (NFR-004).
+final sensitiveLocalDataProvider = Provider<SensitiveLocalData>(
+  (ref) => const SharedPreferencesSensitiveLocalData(),
 );
 
 /// The application logger.

@@ -181,14 +181,23 @@ class HistoryRecorder {
 }
 
 final historyEventsProvider = StreamProvider.family<List<DeviceEvent>, EventCategory?>((ref, category) {
+  final uid = ref.watch(currentIdentityProvider)?.uid;
   final scope = ref.watch(partnerScopeProvider).value;
   final remote = ref.watch(firestoreHistoryRepositoryProvider);
   final local = ref.watch(localHistoryRepositoryProvider);
+  // No identity, no history. The local cache is device-wide, not per-user, so
+  // it must never be rendered without a signed-in owner to scope it to
+  // (NFR-004: one account's cached data is never shown to another).
+  if (uid == null) {
+    return Stream<List<DeviceEvent>>.value(const <DeviceEvent>[]);
+  }
   if (scope == null || remote == null) {
-    return Stream<List<DeviceEvent>>.fromFuture(local.page(category: category, limit: 100));
+    return Stream<List<DeviceEvent>>.fromFuture(
+      local.page(category: category, ownerUserId: uid, limit: 100),
+    );
   }
   return remote.watch(pairId: scope.pairId, category: category).asyncMap((remoteEvents) async {
-    final cached = await local.page(category: category, limit: 100);
+    final cached = await local.page(category: category, ownerUserId: uid, limit: 100);
     final byId = <String, DeviceEvent>{
       for (final event in remoteEvents) event.id: event,
       for (final event in cached.where((event) => event.pairId == scope.pairId)) event.id: event,
@@ -201,7 +210,7 @@ final historyEventsProvider = StreamProvider.family<List<DeviceEvent>, EventCate
     return merged.take(100).toList();
   }).transform(StreamTransformer<List<DeviceEvent>, List<DeviceEvent>>.fromHandlers(
     handleError: (error, stackTrace, sink) {
-      unawaited(local.page(category: category, limit: 100).then(sink.add));
+      unawaited(local.page(category: category, ownerUserId: uid, limit: 100).then(sink.add));
     },
   ));
 });
