@@ -69,16 +69,15 @@ abstract interface class LocalNotificationService {
 
 enum NotificationPermissionState { granted, denied, notDetermined, unsupported }
 
-/// Android/iOS notification bridge. Rule logic remains in Dart; native code
+/// Android notification bridge. Rule logic remains in Dart; native code
 /// only asks permission and presents a local notification on this device.
 class MethodChannelLocalNotificationService implements LocalNotificationService {
   const MethodChannelLocalNotificationService();
   static const MethodChannel _channel = MethodChannel('kam/local_notifications');
 
   @override
-  bool get isSupported => !kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.android ||
-       defaultTargetPlatform == TargetPlatform.iOS);
+  bool get isSupported =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   @override
   Future<Result<NotificationPermissionState>> permissionState() =>

@@ -58,8 +58,12 @@ void main() {
       expect(malformed.screenState.error, isNotNull);
     });
 
-    test('iOS style platform reports screen state as unsupported', () async {
-      final collector = _collector(_sample(), platform: 'ios', now: () => start);
+    test('non-Android platform reports screen state as unsupported', () async {
+      final collector = _collector(
+        _sample(),
+        platform: 'nonAndroid',
+        now: () => start,
+      );
       final state = await collector.refresh();
       expect(state.screenState.availability, CapabilityAvailability.unsupported);
       expect(state.screenState.value, isNull);
@@ -174,7 +178,7 @@ void main() {
     });
 
     test('status derives from app lifecycle when screen is unsupported', () async {
-      final collector = _collector(_sample(), platform: 'ios', now: () => start);
+      final collector = _collector(_sample(), platform: 'nonAndroid', now: () => start);
       final initial = await collector.refresh();
       expect(initial.activityStatus.value, ActivityStatus.unknown);
 
@@ -463,7 +467,7 @@ void main() {
     });
 
     test('unsupported screen state round-trips without inventing a value', () async {
-      final state = await _collector(_sample(), platform: 'ios', now: () => start).refresh();
+      final state = await _collector(_sample(), platform: 'nonAndroid', now: () => start).refresh();
       final restored = ActivityState.fromJson(state.toJson());
       expect(restored.screenState.availability, CapabilityAvailability.unsupported);
       expect(restored.screenState.value, isNull);

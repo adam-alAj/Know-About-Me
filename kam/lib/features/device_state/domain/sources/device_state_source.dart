@@ -4,9 +4,9 @@ import '../models/device_state.dart';
 
 /// Contract for reading this device's observable state.
 ///
-/// Android and iOS need different implementations, so the rest of the
-/// application depends on this interface rather than on any plugin (SRS
-/// constraint 3, NFR-017). Implementations:
+/// Android collectors and unsupported targets expose the same normalized
+/// interface, so the application does not depend on Android APIs directly
+/// (SRS constraint 3, NFR-017). Implementations:
 ///
 /// - must declare what they support via [capabilities] instead of returning
 ///   placeholder numbers (FR-068),

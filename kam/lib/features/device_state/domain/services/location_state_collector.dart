@@ -61,7 +61,7 @@ class LocationStateCollector {
   LocationFix? get lastKnownFix => _lastKnownFix;
 
   bool get _platformSupported =>
-      gateway.platformName == 'android' || gateway.platformName == 'ios';
+      gateway.platformName == 'android';
 
   bool get _canObserve =>
       _platformSupported &&

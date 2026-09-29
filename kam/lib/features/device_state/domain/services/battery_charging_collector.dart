@@ -103,7 +103,7 @@ class BatteryChargingCollector {
   }
 
   bool get _isSupportedPlatform =>
-      gateway.platformName == 'android' || gateway.platformName == 'ios';
+      gateway.platformName == 'android';
 
   /// Emits the current reading, then native state/level change events.
   Stream<BatteryState> watchBatteryState() async* {

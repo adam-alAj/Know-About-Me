@@ -9,9 +9,9 @@
 /// to decide which capabilities are even worth asking about (NFR-008, NFR-019).
 enum DevicePlatform {
   android,
-  ios,
 
   /// A platform the application does not recognise. Capabilities for such a
-  /// device must be reported as unsupported rather than assumed.
+  /// device (including an iOS target) must be reported as unsupported rather
+  /// than assumed. Android is the only deployment target for this application.
   unknown,
 }

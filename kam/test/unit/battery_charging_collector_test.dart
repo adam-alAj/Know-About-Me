@@ -164,19 +164,22 @@ void main() {
     expect(snapshot[DeviceMetric.networkStatus]?.value, 'online');
   });
 
-  test('iOS style source is explicitly unsupported and state round-trips', () async {
+  test('non-Android battery collection is unsupported and state round-trips', () async {
     final collector = BatteryChargingCollector(
       gateway: _FakeBatteryGateway(
         _sample(charging: 'full', sourceSupported: false),
-        platformName: 'ios',
+        platformName: 'nonAndroid',
       ),
       now: () => observedAt,
     );
     final state = await collector.refresh();
+    expect(state.percentage.availability, CapabilityAvailability.unsupported);
+    expect(state.chargingState.availability, CapabilityAvailability.unsupported);
+    expect(state.chargingDuration.availability, CapabilityAvailability.unsupported);
     expect(state.chargingSource.availability, CapabilityAvailability.unsupported);
     final restored = BatteryState.fromJson(state.toJson());
     expect(restored.percentage.value, state.percentage.value);
-    expect(restored.chargingState.value, BatteryChargingState.full);
+    expect(restored.chargingState.availability, CapabilityAvailability.unsupported);
     expect(restored.chargingSource.availability, CapabilityAvailability.unsupported);
 
     final snapshot = DeviceStateSnapshot(
@@ -188,9 +191,10 @@ void main() {
     );
     final restoredSnapshot = DeviceStateSnapshot.fromJson(snapshot.toJson());
     expect(
-      restoredSnapshot.battery?.chargingState.value,
-      BatteryChargingState.full,
+      restoredSnapshot.battery?.chargingState.availability,
+      CapabilityAvailability.unsupported,
     );
+    expect(restoredSnapshot.battery?.chargingState.value, isNull);
   });
 }
 

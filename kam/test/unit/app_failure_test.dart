@@ -22,7 +22,9 @@ void main() {
       );
       expect(
         AppFailure.fromException(
-          const UnsupportedCapabilityException('no screen state on iOS'),
+          const UnsupportedCapabilityException(
+            'Screen state is unsupported on this target.',
+          ),
         ).type,
         FailureType.unsupportedCapability,
       );

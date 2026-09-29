@@ -137,12 +137,19 @@ void main() {
     test('maps a failed result to failure', () {
       final presentation = PresentationMapping.fromAsyncResult(
         const AsyncData<Result<int>>(
-          Failure<int>(UnsupportedCapabilityFailure('No screen state on iOS')),
+          Failure<int>(
+            UnsupportedCapabilityFailure(
+              'Screen state is unsupported on this target.',
+            ),
+          ),
         ),
       );
 
       expect(presentation.state, DataPresentationState.failure);
-      expect(presentation.message, 'No screen state on iOS');
+      expect(
+        presentation.message,
+        'Screen state is unsupported on this target.',
+      );
     });
 
     test('maps a thrown error to failure', () {

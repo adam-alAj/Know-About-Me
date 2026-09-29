@@ -17,9 +17,6 @@ abstract interface class PlatformInfo {
 extension PlatformInfoChecks on PlatformInfo {
   /// Whether the app is running on Android.
   bool get isAndroid => platform == DevicePlatform.android;
-
-  /// Whether the app is running on iOS.
-  bool get isIos => platform == DevicePlatform.ios;
 }
 
 /// Production [PlatformInfo] backed by Flutter's target-platform detection.
@@ -32,11 +29,9 @@ class FlutterPlatformInfo implements PlatformInfo {
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
         return DevicePlatform.android;
-      case TargetPlatform.iOS:
-        return DevicePlatform.ios;
       default:
-        // Desktop platforms are not product targets; report unknown rather than
-        // pretending they are a supported mobile platform.
+        // This product deploys to Android only. Other Flutter targets, including
+        // iOS, report unknown so Android capabilities are never invoked there.
         return DevicePlatform.unknown;
     }
   }

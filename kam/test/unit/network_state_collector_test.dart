@@ -145,16 +145,15 @@ void main() {
     expect(online.offlineDuration.availability, CapabilityAvailability.unavailable);
   });
 
-  test('iOS usable path is online while Internet reachability remains unknown', () async {
+  test('non-Android network observation is unsupported', () async {
     final collector = _collector(
       _sample(internet: 'unknown'),
-      platform: 'ios',
+      platform: 'nonAndroid',
       now: () => start,
     );
     final state = await collector.refresh();
-    expect(state.status.value, NetworkOnlineStatus.online);
-    expect(state.internet.value, InternetReachability.unknown);
-    expect(state.internet.availability, CapabilityAvailability.unknown);
+    expect(state.status.availability, CapabilityAvailability.unsupported);
+    expect(state.internet.availability, CapabilityAvailability.unsupported);
   });
 
   test('stored last online survives restart but offline duration does not', () async {

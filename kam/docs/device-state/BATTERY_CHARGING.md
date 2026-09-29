@@ -1,4 +1,4 @@
-# Battery and Charging Monitoring (Phase 7)
+> **Phase 21 platform contract:** Android is the only supported runtime target. iOS and other non-Android targets are unsupported and unvalidated; older platform-specific implementation descriptions below are historical and must not be used as the current support contract. See [Android compatibility and limitations](../platform/ANDROID_COMPATIBILITY_AND_LIMITATIONS.md).`r`n`r`n# Battery and Charging Monitoring (Phase 7)
 
 ## Normalized state
 

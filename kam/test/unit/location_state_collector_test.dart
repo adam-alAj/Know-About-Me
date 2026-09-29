@@ -797,7 +797,7 @@ class _FakeBatteryGateway implements BatteryPlatformGateway {
 
 class _FakeActivityGateway implements ActivityPlatformGateway {
   @override
-  String get platformName => 'ios';
+  String get platformName => 'nonAndroid';
   @override
   Future<Object?> readCurrent() async => const ActivityPlatformSample(
     screenStateSupported: false,

@@ -120,7 +120,7 @@ class NetworkStateCollector {
   }
 
   bool get _isSupportedPlatform =>
-      gateway.platformName == 'android' || gateway.platformName == 'ios';
+      gateway.platformName == 'android';
 
   Future<void> _restoreLastOnline() => _restoreTask ??= () async {
     try {

@@ -1,4 +1,4 @@
-# Platform Capability Matrix
+> **Phase 21 platform contract:** Android is the only supported runtime target. iOS and other non-Android targets are unsupported and unvalidated; older platform-specific implementation descriptions below are historical and must not be used as the current support contract. See [Android compatibility and limitations](../platform/ANDROID_COMPATIBILITY_AND_LIMITATIONS.md).`r`n`r`n# Platform Capability Matrix
 
 Phase 6 supplied the adapter boundary; Phases 7 and 8 add native battery,
 charging, and network collection; Phase 9 adds display-state, activity-signal

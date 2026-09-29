@@ -34,9 +34,9 @@ import '../../../auth/presentation/providers/auth_providers.dart';
 
 /// The device-state source for this platform.
 ///
-/// Resolves to [UnavailableDeviceStateSource], which reports everything as
-/// unsupported. The device-monitoring phase replaces this override with the real
-/// Android/iOS collector. Tests override it with a fake.
+/// Resolves to [UnavailableDeviceStateSource], which reports unsupported
+/// capabilities on non-Android targets. Android monitoring uses the native
+/// collectors below; tests override this provider with a fake.
 final deviceStateSourceProvider = Provider<DeviceStateSource>(
   (ref) => UnavailableDeviceStateSource(
     platform: ref.watch(platformInfoProvider).platform,

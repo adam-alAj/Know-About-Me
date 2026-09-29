@@ -31,9 +31,9 @@ class LocationFix {
   /// did not report one. Never estimated or improved by this application.
   final double? accuracyMeters;
 
-  /// Whether the OS is only providing reduced/approximate location because the
-  /// user chose that grant (Android 12+ / iOS 14+). The application must not
-  /// present such a fix as precise.
+  /// Whether Android is only providing reduced/approximate location because
+  /// the user chose that grant. The application must not present such a fix as
+  /// precise.
   final bool approximate;
 
   /// Technical producer, for example `android.location_manager`.

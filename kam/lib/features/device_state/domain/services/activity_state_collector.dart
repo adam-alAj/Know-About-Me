@@ -55,10 +55,9 @@ class ActivityStateCollector {
   /// `null` when none has been observed.
   DateTime? get lastObservedActivityAt => _lastObservedActivityAt;
 
-  /// The display state is observable only on Android; iOS exposes no public
-  /// screen on/off API to third-party apps and must remain `unsupported`
-  /// rather than approximated. The app lifecycle comes from the Flutter
-  /// framework itself, so it is supported on every platform.
+  /// Display state is implemented only on Android. Other targets report it as
+  /// `unsupported` rather than approximating it. The app lifecycle comes from
+  /// Flutter, so that separate signal remains available wherever this app runs.
   bool get _screenSupported => gateway.platformName == 'android';
 
   Map<DeviceMetric, DeviceCapabilityStatus> get capabilityStatus => {

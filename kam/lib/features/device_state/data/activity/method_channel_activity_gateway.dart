@@ -2,11 +2,8 @@ import 'package:flutter/services.dart';
 
 import '../../domain/sources/activity_platform_source.dart';
 
-/// Native bridge for the Android display-state signal.
-///
-/// Only invoked on platforms whose collector declares screen support
-/// (Android); iOS has no public screen on/off API, so no channel is ever
-/// called there and no approximation is made.
+/// Native bridge for the Android display-state signal. Non-Android targets
+/// are reported unsupported by the collector and do not invoke this channel.
 class MethodChannelActivityGateway implements ActivityPlatformGateway {
   MethodChannelActivityGateway(this.platformName);
 

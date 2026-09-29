@@ -293,7 +293,7 @@ void main() {
 
 class _FakeGateway implements ActivityPlatformGateway {
   @override
-  String get platformName => 'ios';
+  String get platformName => 'nonAndroid';
 
   @override
   Future<Object?> readCurrent() async => const ActivityPlatformSample(

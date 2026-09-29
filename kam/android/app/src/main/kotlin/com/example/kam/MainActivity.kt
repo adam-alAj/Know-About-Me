@@ -10,6 +10,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.hardware.display.DisplayManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -21,7 +22,6 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.PowerManager
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -57,12 +57,9 @@ class MainActivity : FlutterActivity() {
         completeOneShot(oneShotFallback ?: mapOf("error" to "timeout"))
     }
 
-    // In-memory only: used to tell "never asked" apart from "asked and refused".
-    // A process restart resets it, which is why the state stays best-effort.
-    private var locationPermissionRequested = false
-
     private companion object {
         const val LOCATION_PERMISSION_REQUEST_CODE = 7401
+        const val NOTIFICATION_PERMISSION_REQUEST_CODE = 7402
 
         // Throttling for the update stream. Foreground-only, battery-aware.
         const val LOCATION_MIN_TIME_MS = 60_000L
@@ -93,12 +90,15 @@ class MainActivity : FlutterActivity() {
                                 getSharedPreferences("kam_permissions", MODE_PRIVATE).edit()
                                     .putBoolean("notification_asked", true).apply()
                                 pendingNotificationPermissionResult = result
-                                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7402)
+                                requestPermissions(
+                                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                                    NOTIFICATION_PERMISSION_REQUEST_CODE,
+                                )
                             }
                         } else result.success(notificationPermissionState())
                     }
                     "show" -> {
-                        if (Build.VERSION.SDK_INT >= 33 && notificationPermissionState() != "granted") {
+                        if (notificationPermissionState() != "granted") {
                             result.error("permission_denied", "Notification permission is not granted.", null)
                         } else {
                             showLocalNotification(call.argument<String>("id") ?: "alert", call.argument<String>("title") ?: "Rule alert", call.argument<String>("body") ?: "", call.argument<String>("payload"))
@@ -225,11 +225,10 @@ class MainActivity : FlutterActivity() {
                 }
             })
 
-        // Phase 9: display-state observation. ACTION_SCREEN_ON/OFF are only
-        // delivered to dynamically registered receivers while this process is
-        // alive; they can never wake a terminated app, so no background
-        // monitoring is claimed. No permission is required: isInteractive is a
-        // plain getter and screen broadcasts need no grant to receive.
+        // Display-state observation. ACTION_SCREEN_ON/OFF are only delivered to
+        // dynamically registered receivers while this process is alive; they
+        // cannot wake a terminated app, so no background monitoring is claimed.
+        // No permission is required for the default Display state or broadcasts.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, activityMethodChannelName)
             .setMethodCallHandler { call, result ->
                 if (call.method == "getCurrentActivityState") {
@@ -312,17 +311,21 @@ class MainActivity : FlutterActivity() {
             pendingLocationPermissionResult?.success(locationStatusMap())
             pendingLocationPermissionResult = null
         }
-        if (requestCode == 7402) {
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST_CODE) {
             pendingNotificationPermissionResult?.success(notificationPermissionState())
             pendingNotificationPermissionResult = null
         }
     }
 
-    private fun notificationPermissionState(): String = when {
-        Build.VERSION.SDK_INT < 33 -> "granted"
-        checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED -> "granted"
-        getSharedPreferences("kam_permissions", MODE_PRIVATE).getBoolean("notification_asked", false) -> "denied"
-        else -> "notDetermined"
+    private fun notificationPermissionState(): String {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            val asked = getSharedPreferences("kam_permissions", MODE_PRIVATE)
+                .getBoolean("notification_asked", false)
+            return if (asked) "denied" else "notDetermined"
+        }
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        return if (manager.areNotificationsEnabled()) "granted" else "denied"
     }
 
     private fun showLocalNotification(id: String, title: String, body: String, ruleId: String?) {
@@ -335,7 +338,7 @@ class MainActivity : FlutterActivity() {
         }
         val pending = intent?.let { PendingIntent.getActivity(this, id.hashCode(), it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE) }
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, notificationChannelName) else Notification.Builder(this)
-        builder.setSmallIcon(applicationInfo.icon).setContentTitle(title).setContentText(body)
+        builder.setSmallIcon(R.drawable.ic_stat_kam).setContentTitle(title).setContentText(body)
             .setStyle(Notification.BigTextStyle().bigText(body)).setAutoCancel(true).setContentIntent(pending)
         manager.notify(id.hashCode(), builder.build())
     }
@@ -390,15 +393,21 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun locationPermissionState(): String {
-        if (hasLocationPermission()) return "granted"
+        val preferences = getSharedPreferences("kam_permissions", MODE_PRIVATE)
+        if (hasLocationPermission()) {
+            preferences.edit().putBoolean("location_ever_granted", true).apply()
+            return "granted"
+        }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return "denied"
         val shouldExplain = shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION) ||
             shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION)
         if (shouldExplain) return "denied"
-        // "Never asked" and "asked and permanently refused" look identical to
-        // the platform, so the in-memory flag distinguishes them as far as it
-        // reliably can.
-        return if (locationPermissionRequested) "permanentlyDenied" else "notDetermined"
+        // A one-time grant can expire without an explicit denial. Preserve that
+        // distinction so an expired grant is requestable again after restart.
+        val wasGranted = preferences.getBoolean("location_ever_granted", false)
+        if (wasGranted) return "denied"
+        val asked = preferences.getBoolean("location_asked", false)
+        return if (asked) "permanentlyDenied" else "notDetermined"
     }
 
     private fun locationStatusMap(): Map<String, Any?> = mapOf(
@@ -413,12 +422,18 @@ class MainActivity : FlutterActivity() {
             result.success(locationStatusMap())
             return
         }
+        if (locationPermissionState() == "permanentlyDenied") {
+            result.success(locationStatusMap())
+            return
+        }
         if (pendingLocationPermissionResult != null) {
             result.error("request_in_progress", "A location permission request is already open.", null)
             return
         }
         pendingLocationPermissionResult = result
-        locationPermissionRequested = true
+        getSharedPreferences("kam_permissions", MODE_PRIVATE).edit()
+            .putBoolean("location_asked", true)
+            .apply()
         requestPermissions(
             arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
             LOCATION_PERMISSION_REQUEST_CODE,
@@ -617,11 +632,15 @@ class MainActivity : FlutterActivity() {
 
     private fun readActivityState(): Map<String, Any?> {
         return try {
-            val power = getSystemService(Context.POWER_SERVICE) as PowerManager
-            mapOf(
-                "screenState" to if (power.isInteractive) "on" else "off",
-                "screenStateSupported" to true,
-            )
+            val displays = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+            val display = displays.getDisplay(android.view.Display.DEFAULT_DISPLAY)
+                ?: return mapOf("screenState" to null, "screenStateSupported" to true)
+            val state = when (display.state) {
+                android.view.Display.STATE_ON -> "on"
+                android.view.Display.STATE_OFF -> "off"
+                else -> null
+            }
+            mapOf("screenState" to state, "screenStateSupported" to true)
         } catch (error: RuntimeException) {
             // Report no value rather than guessing the display state.
             mapOf(

@@ -1,4 +1,4 @@
-# Platform Capability Matrix
+> **Phase 21 platform contract:** Android is the only supported runtime target. iOS and other non-Android targets are unsupported and unvalidated; older platform-specific implementation descriptions below are historical and must not be used as the current support contract. See [Android compatibility and limitations](../platform/ANDROID_COMPATIBILITY_AND_LIMITATIONS.md).`r`n`r`n# Platform Capability Matrix
 
 What Android and iOS **actually permit** for each capability the SRS mentions.
 Phase 1 produces no monitoring code; this matrix is the contract later phases
