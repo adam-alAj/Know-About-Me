@@ -65,4 +65,5 @@ The app is organized by feature under `lib/features/`, with shared services unde
 - [Offline, stale data, and recovery](docs/reliability/OFFLINE_STALE_DATA_AND_RECOVERY.md)
 - [Platform capabilities](docs/platform/PLATFORM_CAPABILITIES.md)
 - [Android compatibility and limitations](docs/platform/ANDROID_COMPATIBILITY_AND_LIMITATIONS.md)
+- [UI/UX and accessibility](docs/ui/UI_UX_AND_ACCESSIBILITY.md)
 - [Requirements mapping](docs/requirements/REQUIREMENT_MAPPING.md)

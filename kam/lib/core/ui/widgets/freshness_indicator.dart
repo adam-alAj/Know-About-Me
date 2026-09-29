@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../constants/app_spacing.dart';
 import '../../freshness/data_freshness.dart';
 import '../../time/date_time_utils.dart';
 
@@ -45,27 +46,29 @@ class FreshnessIndicator extends StatelessWidget {
     final theme = Theme.of(context);
     final label = labelFor(freshness, age);
     final isStale = freshness == DataFreshness.stale;
+    final statusColor = isStale
+        ? theme.colorScheme.tertiary
+        : theme.colorScheme.onSurfaceVariant;
 
     return Semantics(
       label: label,
+      excludeSemantics: true,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
             isStale ? Icons.history_toggle_off : Icons.schedule,
-            size: 14,
-            color: isStale
-                ? theme.colorScheme.error
-                : theme.colorScheme.outline,
+            size: compact ? 14 : 18,
+            color: statusColor,
           ),
-          const SizedBox(width: 4),
+          SizedBox(width: compact ? AppSpacing.xs : AppSpacing.sm),
           Text(
             label,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: isStale
-                  ? theme.colorScheme.error
-                  : theme.colorScheme.outline,
-            ),
+            style:
+                (compact
+                        ? theme.textTheme.bodySmall
+                        : theme.textTheme.bodyMedium)
+                    ?.copyWith(color: statusColor),
           ),
         ],
       ),

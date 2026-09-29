@@ -111,6 +111,7 @@ class _PrivacyScreenState extends ConsumerState<PrivacyScreen> {
     final sharingAsync = ref.watch(ownSharingProvider);
     final memberships = ref.watch(pairMembershipsProvider).value ?? const [];
     final sharing = sharingAsync.asData?.value ?? PairSharingState.none;
+    final sharingConfirmed = sharingAsync.hasValue && !sharingAsync.hasError;
     final matchingMemberships = scope == null
         ? const <PairMembership>[]
         : memberships.where((item) => item.pairId == scope.pairId).toList();
@@ -164,6 +165,25 @@ class _PrivacyScreenState extends ConsumerState<PrivacyScreen> {
                     'What you share',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
+                  if (sharingAsync.isLoading && !sharingAsync.hasValue)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: LinearProgressIndicator(),
+                    ),
+                  if (!sharingConfirmed)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        'Settings are read-only until your current sharing choices can be confirmed.',
+                      ),
+                    ),
+                  if (sharingAsync.hasError)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        'Sharing settings could not be confirmed. Try again when your connection is available.',
+                      ),
+                    ),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(
@@ -173,7 +193,7 @@ class _PrivacyScreenState extends ConsumerState<PrivacyScreen> {
                       'Pausing temporarily stops live sharing. Your category choices are saved.',
                     ),
                     value: sharing.paused,
-                    onChanged: _busy
+                    onChanged: _busy || !sharingConfirmed
                         ? null
                         : (value) => _setSharing(paused: value),
                   ),
@@ -189,7 +209,7 @@ class _PrivacyScreenState extends ConsumerState<PrivacyScreen> {
                         ),
                       ),
                       value: sharing.categories.contains(category),
-                      onChanged: _busy
+                      onChanged: _busy || !sharingConfirmed
                           ? null
                           : (value) {
                               final next = Set<SharingCategory>.of(
@@ -232,13 +252,6 @@ class _PrivacyScreenState extends ConsumerState<PrivacyScreen> {
               ),
             ),
           ],
-          if (sharingAsync.hasError)
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: Text(
-                'Sharing settings could not be confirmed. Sharing is treated as off until they can be read.',
-              ),
-            ),
         ],
       ),
     );

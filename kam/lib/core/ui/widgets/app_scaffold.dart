@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../constants/app_spacing.dart';
+
 /// Consistent page structure so every screen has the same app-bar behaviour and
 /// body padding (SRS Task 12, Task 14).
 class AppScaffold extends StatelessWidget {
@@ -37,9 +39,26 @@ class AppScaffold extends StatelessWidget {
       appBar: AppBar(title: Text(title), actions: actions, leading: leading),
       body: padBody
           ? SafeArea(
-              child: Padding(padding: const EdgeInsets.all(16), child: body),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 800),
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    child: body,
+                  ),
+                ),
+              ),
             )
-          : SafeArea(child: body),
+          : SafeArea(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 800),
+                  child: body,
+                ),
+              ),
+            ),
       floatingActionButton: floatingActionButton,
     );
   }

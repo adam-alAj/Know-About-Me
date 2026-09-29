@@ -12,11 +12,48 @@ import '../../core/constants/app_spacing.dart';
 /// the theme only provides the palette.
 ThemeData buildAppTheme() {
   final colorScheme = ColorScheme.fromSeed(seedColor: const Color(0xFF3B6E8F));
+  final outline = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(AppSpacing.radius),
+  );
 
   return ThemeData(
     colorScheme: colorScheme,
     useMaterial3: true,
     visualDensity: VisualDensity.standard,
+    scaffoldBackgroundColor: colorScheme.surface,
+    inputDecorationTheme: InputDecorationTheme(
+      border: outline,
+      enabledBorder: outline.copyWith(
+        borderSide: BorderSide(color: colorScheme.outlineVariant),
+      ),
+      focusedBorder: outline.copyWith(
+        borderSide: BorderSide(color: colorScheme.primary, width: 2),
+      ),
+      errorBorder: outline.copyWith(
+        borderSide: BorderSide(color: colorScheme.error),
+      ),
+      focusedErrorBorder: outline.copyWith(
+        borderSide: BorderSide(color: colorScheme.error, width: 2),
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+    ),
+    iconButtonTheme: IconButtonThemeData(
+      style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
+    ),
     cardTheme: CardThemeData(
       elevation: 0,
       margin: EdgeInsets.zero,
