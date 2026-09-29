@@ -24,27 +24,62 @@ enum SyncDecision {
   /// previously synchronized document is left as it was.
   withheld,
 
-  /// The write was attempted and rejected or failed. The change is *not*
-  /// recorded, so the next trigger retries the latest state.
+  /// The write failed for a reason that may fix itself (network, deadline,
+  /// quota). The change is *not* recorded, so a later attempt republishes the
+  /// latest state rather than replaying a queue (Phase 20 §22).
   failed,
+
+  /// The write was refused for a reason that will not fix itself
+  /// (authorization, validation). Nothing is retried: repeating an unauthorized
+  /// request forever is exactly what the security baseline forbids
+  /// (Phase 20 §22, §29).
+  blocked,
+}
+
+/// Why a write did not succeed, used to decide whether retrying is meaningful.
+enum SyncFailureKind {
+  /// Network, deadline, quota or an unclassified error: worth a bounded retry.
+  transient,
+
+  /// `permission-denied` / `unauthenticated`: the request is not authorized.
+  unauthorized,
+
+  /// `invalid-argument` / `failed-precondition`: the request is malformed for
+  /// the current state and will stay refused until the state changes.
+  rejected,
+
+  /// No technical reason was available.
+  unknown,
 }
 
 /// The outcome for one synchronized document.
 class SyncOutcome {
-  const SyncOutcome(this.kind, this.decision, {this.reason});
+  const SyncOutcome(this.kind, this.decision, {this.reason, this.failureKind});
 
   final SyncDocumentKind kind;
   final SyncDecision decision;
 
-  /// A safe technical reason, never a data value.
+  /// A safe technical reason (a Firestore error code), never a data value.
   final String? reason;
 
-  bool get isFailure => decision == SyncDecision.failed;
+  /// Present when the write did not succeed.
+  final SyncFailureKind? failureKind;
+
+  /// Whether the write did not succeed, for any reason.
+  bool get isFailure =>
+      decision == SyncDecision.failed || decision == SyncDecision.blocked;
+
+  /// Whether another attempt could plausibly succeed.
+  bool get isRetryable => decision == SyncDecision.failed;
+
+  /// Whether the backend refused the write permanently.
+  bool get isBlocked => decision == SyncDecision.blocked;
 
   @override
   String toString() =>
       'SyncOutcome(${kind.name}: ${decision.name}'
-      '${reason == null ? '' : ', $reason'})';
+      '${reason == null ? '' : ', $reason'}'
+      '${failureKind == null ? '' : ', ${failureKind!.name}'})';
 }
 
 /// One request to synchronize the current local state.
@@ -107,19 +142,71 @@ class DeviceStateSyncService {
   /// How long bursts of local change are coalesced before a write is attempted.
   final Duration coalesceWindow;
 
+  /// How many consecutive *transient* failures are retried with backoff before
+  /// the service stops and waits for the next trigger (a local change or a
+  /// reconnection). Bounded on purpose: this is a two-person Spark application,
+  /// not a distributed retry system (Phase 20 §22).
+  static const int maxRetryAttempts = 4;
+
+  /// Base delay for the exponential backoff between retries.
+  static const Duration retryBaseDelay = Duration(seconds: 2);
+
+  /// Upper bound on a retry delay.
+  static const Duration retryMaxDelay = Duration(seconds: 30);
+
   final StreamController<List<SyncOutcome>> _results =
       StreamController<List<SyncOutcome>>.broadcast();
+  final StreamController<bool> _busy = StreamController<bool>.broadcast();
 
   SyncRequest? _latest;
   bool _running = false;
   int? _version;
   bool _disposed = false;
 
+  /// Consecutive transient failures since the last successful run.
+  int _retryAttempt = 0;
+
   /// The outcome of every completed synchronization run.
   Stream<List<SyncOutcome>> get results => _results.stream;
 
-  /// Whether a write is currently in flight.
-  bool get isBusy => _running;
+  /// Emits whenever a write starts or finishes, so the connection indicator can
+  /// show "syncing" from real evidence instead of guessing.
+  Stream<bool> get busy => _busy.stream;
+
+  /// Whether a write is in flight or a retry is scheduled.
+  bool get isBusy => _running || _scheduler.hasPending;
+
+  /// How many consecutive transient failures have happened. Exposed for tests
+  /// and for the recovery indicator.
+  int get retryAttempt => _retryAttempt;
+
+  /// Classifies a write failure so retrying is a decision, not a reflex.
+  ///
+  /// `permission-denied` is **not** "offline", and `invalid-argument` is not a
+  /// network problem; only genuinely transient codes are retried (Phase 20 §23).
+  static SyncFailureKind classifyFailure(String? reason) {
+    switch (reason) {
+      case 'permission-denied':
+      case 'unauthenticated':
+        return SyncFailureKind.unauthorized;
+      case 'invalid-argument':
+      case 'failed-precondition':
+      case 'out-of-range':
+        return SyncFailureKind.rejected;
+      case 'unavailable':
+      case 'deadline-exceeded':
+      case 'resource-exhausted':
+      case 'aborted':
+      case 'internal':
+      case 'cancelled':
+      case 'network-request-failed':
+        return SyncFailureKind.transient;
+      default:
+        // An unrecognized code is treated as possibly transient, but it still
+        // gets the same bounded attempt budget as a known transient failure.
+        return SyncFailureKind.unknown;
+    }
+  }
 
   /// The newest version this device has issued in this session.
   int? get currentVersion => _version;
@@ -203,21 +290,25 @@ class DeviceStateSyncService {
     _changeTracker.reset();
     _version = null;
     _versionLoad = null;
+    _retryAttempt = 0;
     if (!_results.isClosed) _results.add(const <SyncOutcome>[]);
   }
 
-  /// Releases the timer and the result stream.
+  /// Releases the timer and the result streams.
   Future<void> dispose() async {
     _disposed = true;
     _scheduler.cancel();
     await _results.close();
+    await _busy.close();
   }
 
   // ------------------------------------------------------------- internals --
 
   Future<void> _drain() async {
-    if (_running) return;
+    if (_running || _disposed) return;
     _running = true;
+    _emitBusy(true);
+    SyncRequest? retryRequest;
     try {
       while (_latest != null && !_disposed) {
         final request = _latest!;
@@ -229,10 +320,60 @@ class DeviceStateSyncService {
           sharingPaused: request.sharingPaused,
         );
         if (!_results.isClosed) _results.add(outcomes);
+        retryRequest = _planRetry(request, outcomes);
       }
     } finally {
       _running = false;
+      _emitBusy(false);
     }
+    // Scheduled outside the loop: retrying inside it would spin without ever
+    // letting a newer local snapshot supersede the failed one.
+    if (retryRequest != null) _scheduleRetry(retryRequest);
+  }
+
+  /// Decides whether a finished run leaves work worth retrying.
+  ///
+  /// A blocked outcome ends the retry chain immediately: an unauthorized or
+  /// malformed write will stay refused, so repeating it would only produce
+  /// denied requests and wasted quota (Phase 20 §22, §27).
+  SyncRequest? _planRetry(SyncRequest request, List<SyncOutcome> outcomes) {
+    if (outcomes.any((outcome) => outcome.isBlocked)) {
+      _retryAttempt = 0;
+      return null;
+    }
+    if (outcomes.any((outcome) => outcome.isRetryable)) return request;
+    // A clean run (published, unchanged, withheld or deleted) clears the budget.
+    _retryAttempt = 0;
+    return null;
+  }
+
+  void _scheduleRetry(SyncRequest request) {
+    if (_disposed) return;
+    _retryAttempt++;
+    if (_retryAttempt > maxRetryAttempts) {
+      // Budget exhausted: wait for the next local change or a reconnection
+      // rather than retrying indefinitely.
+      _retryAttempt = 0;
+      return;
+    }
+    // The retry republishes the *latest* state: a newer local snapshot always
+    // wins over the failed one, so nothing is replayed out of order.
+    _latest = request;
+    _scheduler.schedule(_retryDelay(_retryAttempt), _drain);
+  }
+
+  /// Exponential backoff, bounded by [retryMaxDelay].
+  static Duration _retryDelay(int attempt) {
+    final millis = retryBaseDelay.inMilliseconds * (1 << (attempt - 1));
+    return Duration(
+      milliseconds: millis > retryMaxDelay.inMilliseconds
+          ? retryMaxDelay.inMilliseconds
+          : millis,
+    );
+  }
+
+  void _emitBusy(bool value) {
+    if (!_busy.isClosed) _busy.add(value);
   }
 
   Future<SyncOutcome> _write(String pairId, SyncPayload payload) async {
@@ -243,23 +384,29 @@ class DeviceStateSyncService {
         payload: payload,
       );
       if (result.isFailure) {
-        // The change is deliberately not recorded: the next trigger retries
+        // The change is deliberately not recorded: a later attempt republishes
         // the latest state instead of replaying a queue (Phase 11 §17, §19).
-        return SyncOutcome(
-          payload.kind,
-          SyncDecision.failed,
-          reason: result.reason ?? 'write_failed',
-        );
+        return _failureOutcome(payload.kind, result.reason ?? 'write_failed');
       }
       _changeTracker.recordPublished(payload);
       return SyncOutcome(payload.kind, SyncDecision.published);
     } catch (error) {
-      return SyncOutcome(
-        payload.kind,
-        SyncDecision.failed,
-        reason: error.runtimeType.toString(),
-      );
+      return _failureOutcome(payload.kind, error.runtimeType.toString());
     }
+  }
+
+  /// Turns a technical failure reason into a retry decision.
+  static SyncOutcome _failureOutcome(SyncDocumentKind kind, String reason) {
+    final failureKind = classifyFailure(reason);
+    final blocked =
+        failureKind == SyncFailureKind.unauthorized ||
+        failureKind == SyncFailureKind.rejected;
+    return SyncOutcome(
+      kind,
+      blocked ? SyncDecision.blocked : SyncDecision.failed,
+      reason: reason,
+      failureKind: failureKind,
+    );
   }
 
   Future<SyncOutcome> _retract(
@@ -278,20 +425,12 @@ class DeviceStateSyncService {
         payload: payload,
       );
       if (result.isFailure) {
-        return SyncOutcome(
-          payload.kind,
-          SyncDecision.failed,
-          reason: result.reason ?? 'delete_failed',
-        );
+        return _failureOutcome(payload.kind, result.reason ?? 'delete_failed');
       }
       _changeTracker.forget(payload.kind);
       return SyncOutcome(payload.kind, SyncDecision.deleted);
     } catch (error) {
-      return SyncOutcome(
-        payload.kind,
-        SyncDecision.failed,
-        reason: error.runtimeType.toString(),
-      );
+      return _failureOutcome(payload.kind, error.runtimeType.toString());
     }
   }
 

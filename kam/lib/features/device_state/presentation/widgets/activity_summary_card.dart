@@ -114,7 +114,8 @@ class ActivitySummaryCard extends ConsumerWidget {
   static String _lastActivityLabel(DateTime? timestamp, DateTime now) {
     if (timestamp == null) return 'None observed yet';
     final age = now.toUtc().difference(timestamp.toUtc());
-    final stale = age > FreshnessPolicy.standard.recentFor;
+    final stale =
+        FreshnessPolicy.standard.classifyAge(age) == DataFreshness.stale;
     return '${_relativeTime(age)}${stale ? ' (stale)' : ''}';
   }
 

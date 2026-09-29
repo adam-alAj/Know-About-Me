@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../core/config/app_config.dart';
 import 'router/app_router.dart';
 import 'theme/app_theme.dart';
+import '../features/device_state/presentation/providers/connection_providers.dart';
 import '../features/device_state/presentation/providers/device_state_providers.dart';
 import '../features/device_state/presentation/providers/device_monitoring_lifecycle.dart';
 import '../features/device_state/presentation/providers/sync_providers.dart';
@@ -36,6 +37,14 @@ class KamApp extends ConsumerWidget {
     return DeviceMonitoringLifecycle(
       controller: ref.watch(deviceMonitoringControllerProvider),
       activityCollector: ref.watch(activityStateCollectorProvider),
+      onResume: () {
+        // Recompute the connection from the latest evidence already held, and
+        // give a queued or failed publish another trigger. Neither action
+        // creates a listener, so resuming can never duplicate one
+        // (Phase 20 §20, §21).
+        ref.read(connectionStatusProvider.notifier).refresh();
+        ref.read(deviceStateSyncCoordinatorProvider)?.reassertLatest();
+      },
       child: MaterialApp.router(
         title: 'Know About Me',
         debugShowCheckedModeBanner: false,

@@ -38,6 +38,20 @@ class DeviceStateSyncCoordinator {
     await _service.reset();
   }
 
+  /// Applies a sharing snapshot this device could actually confirm.
+  ///
+  /// `null` means **unknown**, not "nothing is shared": the snapshot was served
+  /// from Firestore's local cache with no local write pending, so it is the last
+  /// known setting rather than a decision. Treating that as "share nothing"
+  /// would retract the user's own published documents merely because the device
+  /// went offline — a spurious delete that the partner sees, followed by a
+  /// republish when the connection returns (Phase 20 §11, §27). The last applied
+  /// sharing therefore stays in force until a confirmed value arrives.
+  void applyConfirmedSharing(PairSharingState? sharing) {
+    if (sharing == null) return;
+    updateSharing(sharing);
+  }
+
   /// Applies the owner's current sharing switches.
   void updateSharing(PairSharingState sharing) {
     if (sharing.paused == _sharing.paused &&
@@ -66,6 +80,17 @@ class DeviceStateSyncCoordinator {
         sharingPaused: _sharing.paused,
       ),
     );
+  }
+
+  /// Re-requests publication of the latest snapshot.
+  ///
+  /// Called when the application resumes or the connection returns. It gives a
+  /// bounded retry chain a new trigger without replaying anything: the service
+  /// still publishes only the *latest* state, and only if the meaningful
+  /// content actually changed (Phase 20 §20, §22, §27).
+  void reassertLatest() {
+    final snapshot = _latestSnapshot;
+    if (snapshot != null) onLocalSnapshot(snapshot);
   }
 
   /// Publishes immediately, bypassing coalescing.

@@ -14,6 +14,7 @@ class PairSharingState {
     required this.paused,
     required this.categories,
     this.isFromCache = false,
+    this.hasPendingWrites = false,
   });
 
   /// Nothing has been configured yet: share nothing.
@@ -33,6 +34,20 @@ class PairSharingState {
   /// A cached sharing record is the last known setting, not proof of current
   /// authorization while this device is offline.
   final bool isFromCache;
+
+  /// Whether this device holds a local write for the sharing document that the
+  /// server has not acknowledged yet.
+  ///
+  /// The distinction between a *decision* and the *last known value* matters
+  /// offline. A pending local write is the user's own latest decision and must
+  /// take effect locally at once, even though the server has not confirmed it
+  /// (Phase 20 §11). A cache-only value with no pending write is merely the last
+  /// setting this device saw, so it must not be turned into a new decision.
+  final bool hasPendingWrites;
+
+  /// Whether this snapshot reflects a decision rather than the last known value:
+  /// the server confirmed it, or it carries our own unacknowledged local write.
+  bool get isConfirmed => !isFromCache || hasPendingWrites;
 
   /// Whether [category] may currently be transmitted.
   bool shares(SharingCategory category) =>
@@ -54,5 +69,6 @@ class PairSharingState {
 
   @override
   String toString() =>
-      'PairSharingState(paused: $paused, categories: ${categories.length})';
+      'PairSharingState(paused: $paused, categories: ${categories.length}, '
+      'cached: $isFromCache, pending: $hasPendingWrites)';
 }

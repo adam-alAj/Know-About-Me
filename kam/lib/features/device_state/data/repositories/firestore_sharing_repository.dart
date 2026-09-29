@@ -20,19 +20,25 @@ class FirestoreSharingRepository implements SharingRepository {
     required String pairId,
     required String userId,
   }) {
-    return _document(pairId, userId).snapshots().map((snapshot) {
-      final data = snapshot.data();
-      if (data == null) return PairSharingState.none;
-      return PairSharingState(
-        paused: data['paused'] == true,
-        categories: _categories(data['categories']),
-        isFromCache: snapshot.metadata.isFromCache,
-      );
-    }).handleError((Object _) {
-      // An unreadable sharing document is not an error the user can act on, and
-      // it must never be interpreted as "everything is shared": fail closed.
-      return PairSharingState.none;
-    });
+    return _document(pairId, userId)
+        .snapshots()
+        .map((snapshot) {
+          final data = snapshot.data();
+          if (data == null) return PairSharingState.none;
+          return PairSharingState(
+            paused: data['paused'] == true,
+            categories: _categories(data['categories']),
+            isFromCache: snapshot.metadata.isFromCache,
+            // A local, unacknowledged write is the user's own latest decision. It
+            // must be applied immediately offline (Phase 20 §11).
+            hasPendingWrites: snapshot.metadata.hasPendingWrites,
+          );
+        })
+        .handleError((Object _) {
+          // An unreadable sharing document is not an error the user can act on, and
+          // it must never be interpreted as "everything is shared": fail closed.
+          return PairSharingState.none;
+        });
   }
 
   @override
@@ -46,7 +52,8 @@ class FirestoreSharingRepository implements SharingRepository {
       'userId': userId,
       'pairId': pairId,
       'paused': paused,
-      'categories': categories.map((category) => category.name).toList()..sort(),
+      'categories': categories.map((category) => category.name).toList()
+        ..sort(),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }

@@ -261,9 +261,17 @@ class DeviceMonitoringController {
     );
   }
 
+  /// Releases the platform subscription.
+  ///
+  /// The handle is cleared *before* the cancellation is awaited. Otherwise a
+  /// lifecycle flap (inactive → resumed, for example while a system dialog is
+  /// dismissed) can call [startMonitoring] while a cancelled subscription is
+  /// still stored: it would see a non-null handle, do nothing, and leave the
+  /// application with no observation at all (Phase 20 §20, §21).
   Future<void> stopMonitoring() async {
-    await _subscription?.cancel();
+    final subscription = _subscription;
     _subscription = null;
+    await subscription?.cancel();
   }
 
   Future<DeviceStateSnapshot> collectNow() => _repository.refresh();

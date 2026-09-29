@@ -7,6 +7,36 @@ import 'package:kam/features/device_state/domain/models/sync_payload.dart';
 import 'package:kam/features/device_state/domain/sources/device_state_sync_gateway.dart';
 
 void main() {
+  test('merged state is cache-served if either document is cached', () async {
+    final gateway = _RecordingGateway();
+    final repository = FirestorePartnerDeviceStateRepository(gateway);
+    final receivedAt = DateTime.utc(2026, 9, 28);
+    final result = repository
+        .watch(pairId: 'pair-a', partnerUserId: 'user-b')
+        .first;
+
+    gateway.state.add(
+      RemoteStateDocument(
+        data: <String, Object?>{
+          'ownerUserId': 'user-b',
+          'schemaVersion': 1,
+          'observedAt': receivedAt,
+          'batteryPercentage': 72,
+        },
+        receivedAt: receivedAt,
+        isFromCache: false,
+      ),
+    );
+    gateway.location.add(
+      RemoteStateDocument.absent(receivedAt: receivedAt, isFromCache: true),
+    );
+
+    final partner = await result;
+    expect(partner?.state.isFromCache, isTrue);
+    await gateway.state.close();
+    await gateway.location.close();
+  });
+
   test('emits explicit no-state after both initial documents are absent', () async {
     final gateway = _RecordingGateway();
     final repository = FirestorePartnerDeviceStateRepository(gateway);

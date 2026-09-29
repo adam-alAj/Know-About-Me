@@ -62,7 +62,11 @@ class FirestorePartnerDeviceStateRepository
 
       final RemoteDeviceState? merged;
       if (parsedState != null) {
-        merged = parsedState.withLocation(parsedLocation);
+        merged = parsedState.withLocation(
+          parsedLocation,
+          isFromCache:
+              stateDocument.isFromCache || locationDocumentSnapshot.isFromCache,
+        );
       } else if (parsedLocation.hasCoordinates) {
         // The state document is absent or unreadable, but the partner did
         // publish a location. A location-only view is still truthful: it reports

@@ -201,7 +201,10 @@ class RemoteDeviceState {
   ///
   /// Used to merge the two synchronized documents (state and location) into one
   /// coherent picture without mutating either.
-  RemoteDeviceState withLocation(RemoteLocationState? value) => RemoteDeviceState(
+  RemoteDeviceState withLocation(
+    RemoteLocationState? value, {
+    bool? isFromCache,
+  }) => RemoteDeviceState(
     pairId: pairId,
     ownerUserId: ownerUserId,
     deviceId: deviceId,
@@ -214,7 +217,9 @@ class RemoteDeviceState {
     lastActivityAt: lastActivityAt,
     chargingStartedAt: chargingStartedAt,
     receivedAt: receivedAt,
-    isFromCache: isFromCache,
+    // The merged state is cache-served if either constituent document is.
+    // Otherwise a fresh state document could hide a cached location snapshot.
+    isFromCache: isFromCache ?? this.isFromCache,
     location: value,
   );
 

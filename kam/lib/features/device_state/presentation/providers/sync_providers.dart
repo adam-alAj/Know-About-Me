@@ -113,15 +113,20 @@ final partnerDeviceStateProvider = StreamProvider<PartnerDeviceState?>((ref) {
 /// Partner state after applying the latest authorization document. Firestore
 /// Rules prevent future unauthorized reads; this projection also removes data
 /// already held in the local stream/cache as soon as sharing changes.
+///
+/// A **cache-served** sharing document does not hide the partner's data by
+/// itself. While offline, the last confirmed sharing decision is still the best
+/// authorization evidence this device has, and hiding legitimately received
+/// values would be less honest than showing them with their age (Phase 20 §8,
+/// §10, §16). What is enforced here is the decision itself: paused or no shared
+/// category ⇒ nothing is shown. Fresh reads remain gated by the Security Rules,
+/// which is why a stale cache can only ever be stale data, never new access.
 final authorizedPartnerDeviceStateProvider =
     Provider<AsyncValue<PartnerDeviceState?>>((ref) {
       final state = ref.watch(partnerDeviceStateProvider);
       final sharing = ref.watch(partnerSharingProvider);
       final access = sharing.asData?.value;
-      if (access == null ||
-          access.paused ||
-          access.isFromCache ||
-          !access.sharesAnything) {
+      if (access == null || access.paused || !access.sharesAnything) {
         return const AsyncData<PartnerDeviceState?>(null);
       }
       return state.whenData((partner) {
@@ -220,10 +225,12 @@ final deviceStateSyncCoordinatorProvider =
 
       ref.listen(ownSharingProvider, (_, next) {
         final configured = next.asData?.value;
-        coordinator.updateSharing(
-          configured == null || configured.isFromCache
-              ? PairSharingState.none
-              : configured,
+        // A confirmed value is one the server acknowledged, or one this device
+        // wrote locally and is still queueing. A purely cache-served value is
+        // the last known setting while offline, so it is "unknown" here rather
+        // than being turned into a decision that retracts the user's own data.
+        coordinator.applyConfirmedSharing(
+          configured == null || !configured.isConfirmed ? null : configured,
         );
       }, fireImmediately: true);
 

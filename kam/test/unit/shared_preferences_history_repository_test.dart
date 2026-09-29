@@ -52,6 +52,20 @@ void main() {
     expect(forStranger, isEmpty);
   });
 
+  test('a retried event is stored exactly once', () async {
+    // Phase 20 §14: a network failure that is retried must not turn one
+    // "charging started" into three. The id is the idempotency key, so a retry
+    // of the same event is a no-op rather than a second entry.
+    final retried = event('charging-1', 'user-a');
+    await repository.add(retried);
+    await repository.add(retried);
+    await repository.add(retried);
+
+    final events = await repository.page(ownerUserId: 'user-a', limit: 100);
+
+    expect(events.map((item) => item.id).toList(), <String>['charging-1']);
+  });
+
   test('an owner filter composes with the category filter', () async {
     await repository.add(event('a1', 'user-a'));
     await repository.add(

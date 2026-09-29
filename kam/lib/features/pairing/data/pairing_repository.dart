@@ -230,6 +230,7 @@ class PairingRepository {
                 ),
                 status: document.data()['status'] as String? ?? 'unknown',
                 isFromCache: document.metadata.isFromCache,
+                hasPendingWrites: document.metadata.hasPendingWrites,
               ),
             )
             .where((membership) => membership.involves(uid))

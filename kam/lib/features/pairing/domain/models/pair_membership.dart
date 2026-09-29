@@ -10,6 +10,7 @@ class PairMembership {
     required this.memberIds,
     required this.status,
     this.isFromCache = false,
+    this.hasPendingWrites = false,
   });
 
   final String pairId;
@@ -27,6 +28,13 @@ class PairMembership {
   /// active; the security rules re-check on every read and write, so a stale
   /// cache can only ever produce a rejected request, never unauthorized access.
   final bool isFromCache;
+
+  /// Whether this device has a local write for this pair document that the
+  /// server has not acknowledged yet.
+  ///
+  /// Used as connectivity evidence (a queued write means the backend is not
+  /// currently reachable), never as authorization.
+  final bool hasPendingWrites;
 
   /// Whether the pair may currently share.
   bool get isActive => status == 'active';
@@ -50,5 +58,6 @@ class PairMembership {
 
   @override
   String toString() =>
-      'PairMembership($pairId, $status, cached: $isFromCache)';
+      'PairMembership($pairId, $status, cached: $isFromCache, '
+      'pending: $hasPendingWrites)';
 }

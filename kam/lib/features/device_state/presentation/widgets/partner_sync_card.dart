@@ -145,7 +145,8 @@ class _OwnPublicationStatus extends ConsumerWidget {
     SyncDecision.deleted => 'removed',
     SyncDecision.unchanged => 'unchanged, not written',
     SyncDecision.withheld => 'nothing trustworthy to publish',
-    SyncDecision.failed => 'failed, will retry on the next change',
+    SyncDecision.failed => 'failed, retrying with backoff',
+    SyncDecision.blocked => 'refused, will not be retried',
   };
 }
 

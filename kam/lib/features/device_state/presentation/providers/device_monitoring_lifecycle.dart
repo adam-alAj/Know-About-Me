@@ -30,10 +30,19 @@ class DeviceMonitoringLifecycle extends StatefulWidget {
     required this.controller,
     required this.child,
     this.activityCollector,
+    this.onResume,
     super.key,
   });
   final DeviceMonitoringController controller;
   final ActivityStateCollector? activityCollector;
+
+  /// Optional hook run once per resume, after monitoring has restarted.
+  ///
+  /// Used to re-derive the connection state and to give an unfinished publish
+  /// another trigger. It must not create subscriptions: a resumed application
+  /// must never end up with two listeners for the same data (Phase 20 §20, §21).
+  final VoidCallback? onResume;
+
   final Widget child;
 
   @override
@@ -52,7 +61,9 @@ class _DeviceMonitoringLifecycleState extends State<DeviceMonitoringLifecycle>
     // `lastObservedActivityAt` timestamp.
     final initial = WidgetsBinding.instance.lifecycleState;
     if (initial != null) {
-      widget.activityCollector?.reportAppLifecycle(appLifecyclePhaseOf(initial));
+      widget.activityCollector?.reportAppLifecycle(
+        appLifecyclePhaseOf(initial),
+      );
     }
     widget.controller.startMonitoring();
   }
@@ -62,6 +73,10 @@ class _DeviceMonitoringLifecycleState extends State<DeviceMonitoringLifecycle>
     widget.activityCollector?.reportAppLifecycle(appLifecyclePhaseOf(state));
     if (state == AppLifecycleState.resumed) {
       widget.controller.startMonitoring();
+      // A resumed app cannot assume a background listener or timer stayed
+      // alive, so the connection is re-derived from fresh evidence and any
+      // unfinished publish is re-requested (Phase 20 §20).
+      widget.onResume?.call();
     } else {
       widget.controller.stopMonitoring();
     }

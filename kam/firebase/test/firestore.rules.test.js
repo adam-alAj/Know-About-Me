@@ -1789,3 +1789,144 @@ test('a forged pair id cannot be used to read someone else\'s history', async ()
   await assertFails(getDoc(doc(as('uA'), 'pairs', 'p2', 'events', 'e-p2')));
   await assertFails(getDocs(collection(as('uA'), 'pairs', 'p2', 'events')));
 });
+
+// ------------------------------------------------- offline / reconnect ------
+// Phase 20 §15, §16, §22, §29: reconnecting re-authorizes. Nothing is granted
+// because a device was offline, and nothing is remembered because an identical
+// write once succeeded. Every request below is decided against the *current*
+// pair, consent and sharing state — the rules stay stateless, which is exactly
+// what makes queued work safe to retry.
+
+test('A. a queued state write is re-authorized against current sharing on reconnect', async () => {
+  const db = as('uA');
+
+  // The write the device was holding while it had no connection.
+  await assertSucceeds(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 64,
+      networkState: 'online',
+    })),
+  );
+
+  // Connection restored: the same intent is authorized again from scratch, not
+  // accepted because an identical write was once legal.
+  await assertSucceeds(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 63,
+      networkState: 'online',
+    })),
+  );
+});
+
+test('B. a queued write is rejected after the relationship changed remotely', async () => {
+  const db = as('uA');
+  await assertSucceeds(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 64,
+    })),
+  );
+
+  // While uA is offline its partner withdraws consent. A fully offline device
+  // cannot know this instantly — that limitation is documented — but the moment
+  // the connection returns, the queued work is refused rather than replayed.
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await seedConsent(context.firestore(), 'p1', 'uB', false);
+  });
+
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 63,
+    })),
+  );
+  // The partner's read is cut at the same moment: authorization, not the local
+  // cache, decides who sees what.
+  await assertFails(getDoc(doc(as('uB'), 'pairs', 'p1', 'deviceState', 'uA')));
+});
+
+test('C. location stays protected when sharing was revoked while offline', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await seedSharing(context.firestore(), 'p1', 'uA', ['battery', 'network', 'location']);
+  });
+
+  const db = as('uA');
+  await assertSucceeds(
+    setDoc(doc(db, 'pairs', 'p1', 'location', 'uA'), sharedLocation('uA', {
+      latitude: 52.51,
+      longitude: 13.41,
+    })),
+  );
+  await assertSucceeds(getDoc(doc(as('uB'), 'pairs', 'p1', 'location', 'uA')));
+
+  // The privacy switch was flipped on the device while it had no connection.
+  // The local change takes effect at once on the device; the server learns it
+  // when the connection returns (Phase 20 §11).
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await seedSharing(context.firestore(), 'p1', 'uA', ['battery', 'network']);
+  });
+
+  // A queued location write is now unauthorized...
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'location', 'uA'), sharedLocation('uA', {
+      latitude: 52.52,
+      longitude: 13.42,
+    })),
+  );
+  // ...and the coordinates already stored stop being readable, so retracting a
+  // category is not merely a client-side promise about future writes.
+  await assertFails(getDoc(doc(as('uB'), 'pairs', 'p1', 'location', 'uA')));
+});
+
+test('D. repeated recovery attempts address one document, never a duplicate', async () => {
+  const db = as('uA');
+
+  // A device that reconnects repeatedly while the same state is current.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await assertSucceeds(
+      setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+        batteryPercentage: 64,
+      })),
+    );
+  }
+
+  // The document id is derived from (pair, owner), so recovery converges on one
+  // document instead of accumulating a write per attempt (Phase 20 §13, §27).
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const docs = await getDocs(
+      collection(context.firestore(), 'pairs', 'p1', 'deviceState'),
+    );
+    assert.equal(docs.docs.filter((entry) => entry.id === 'uA').length, 1);
+  });
+});
+
+test('E. a retried event is refused instead of being duplicated', async () => {
+  const db = as('uA');
+  const event = {
+    ownerUserId: 'uA',
+    type: 'chargingStarted',
+    category: 'charging',
+    occurredAt: ts(),
+    recordedAt: serverTimestamp(),
+    source: 'device',
+    schemaVersion: 1,
+  };
+
+  await assertSucceeds(setDoc(doc(db, 'pairs', 'p1', 'events', 'e-retry'), event));
+
+  // The retry carries the same deterministic id, so it lands on the document
+  // that already exists. History is append-only, so the rules refuse the
+  // rewrite; the client treats that refusal as "already recorded". Either way,
+  // one event stays one event (Phase 20 §14).
+  await assertFails(setDoc(doc(db, 'pairs', 'p1', 'events', 'e-retry'), event));
+  await assertFails(
+    updateDoc(doc(db, 'pairs', 'p1', 'events', 'e-retry'), {
+      type: 'chargingStopped',
+    }),
+  );
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const docs = await getDocs(
+      collection(context.firestore(), 'pairs', 'p1', 'events'),
+    );
+    assert.equal(docs.docs.filter((entry) => entry.id === 'e-retry').length, 1);
+  });
+});
