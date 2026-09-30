@@ -277,21 +277,17 @@ class _PrivacyScreenState extends ConsumerState<PrivacyScreen> {
 
   static String _description(SharingCategory category, bool enabled) {
     if (!enabled) {
-      return 'Not shared. Your partner cannot see this information.';
+      return 'Not shared';
     }
     return switch (category) {
-      SharingCategory.battery => 'Your battery percentage is shared.',
-      SharingCategory.charging => 'Whether your device is charging is shared.',
-      SharingCategory.network =>
-        'Your observed network status is shared; missing connectivity does not mean the phone is off.',
-      SharingCategory.location =>
-        'Your current or last known location may be shared when the device permission and location service are available. Turn this off to remove location from your partner view.',
+      SharingCategory.battery => 'Shared with your partner.',
+      SharingCategory.charging => 'Charging state is shared.',
+      SharingCategory.network => 'Network status is shared.',
+      SharingCategory.location => 'Current or last known location is shared.',
       SharingCategory.distanceFromHome =>
-        'Derived home presence or approximate distance may be shared when Location is also enabled. Your exact home coordinates are not sent.',
-      SharingCategory.activityIndicators =>
-        'Your observed activity and screen state may be shared where the platform supports them.',
-      SharingCategory.ruleInterpretations =>
-        'Rule interpretation events may be shared with your partner.',
+        'At-home / away is shared. Your home coordinates stay private.',
+      SharingCategory.activityIndicators => 'Screen and activity are shared.',
+      SharingCategory.ruleInterpretations => 'Interpretations are shared.',
     };
   }
 }

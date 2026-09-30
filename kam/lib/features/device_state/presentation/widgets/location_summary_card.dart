@@ -27,7 +27,7 @@ class LocationSummaryCard extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Location (technical observations)'),
+        const Text('Location'),
         const SizedBox(height: AppSpacing.xs),
         locationAsync.when(
           data: (state) => _LocationDetails(state: state, now: now),
@@ -104,14 +104,14 @@ class _LocationDetails extends ConsumerWidget {
 
   static String _availabilityLabel(CapabilityAvailability availability) =>
       switch (availability) {
-        CapabilityAvailability.available => 'AVAILABLE',
-        CapabilityAvailability.stale => 'STALE — not a current position',
-        CapabilityAvailability.unavailable => 'UNAVAILABLE',
-        CapabilityAvailability.unknown => 'UNKNOWN',
-        CapabilityAvailability.unsupported => 'UNSUPPORTED',
-        CapabilityAvailability.permissionDenied => 'PERMISSION NOT GRANTED',
-        CapabilityAvailability.serviceDisabled => 'SERVICE DISABLED',
-        CapabilityAvailability.error => 'TEMPORARILY UNAVAILABLE',
+        CapabilityAvailability.available => 'Available',
+        CapabilityAvailability.stale => 'Stale',
+        CapabilityAvailability.unavailable => 'Unavailable',
+        CapabilityAvailability.unknown => 'Unknown',
+        CapabilityAvailability.unsupported => 'Unsupported',
+        CapabilityAvailability.permissionDenied => 'Permission required',
+        CapabilityAvailability.serviceDisabled => 'Location off',
+        CapabilityAvailability.error => 'Temporarily unavailable',
       };
 
   static String _permissionLabel(DevicePermissionState? permission) =>
@@ -180,12 +180,12 @@ class _LocationDetails extends ConsumerWidget {
   }
 
   static String _presenceLabel(HomePresence presence) => switch (presence) {
-    HomePresence.atHome => 'YES',
-    HomePresence.awayFromHome => 'NO',
-    HomePresence.nearHome => 'NEAR (not used by this phase)',
-    HomePresence.stale => 'STALE — location too old to classify',
-    HomePresence.unsupported => 'UNSUPPORTED',
-    HomePresence.unknown => 'UNKNOWN — not enough information',
+    HomePresence.atHome => 'At home',
+    HomePresence.awayFromHome => 'Away',
+    HomePresence.nearHome => 'Near home',
+    HomePresence.stale => 'Stale',
+    HomePresence.unsupported => 'Unsupported',
+    HomePresence.unknown => 'Unknown',
   };
 
   static String _freshnessLabel(DataFreshness freshness) => switch (freshness) {

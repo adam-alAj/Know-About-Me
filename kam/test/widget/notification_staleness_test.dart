@@ -14,6 +14,7 @@ import 'package:kam/features/auth/presentation/providers/auth_providers.dart';
 import 'package:kam/features/device_state/domain/models/pair_sharing_state.dart';
 import 'package:kam/features/device_state/domain/models/remote_device_state.dart';
 import 'package:kam/features/device_state/presentation/providers/sync_providers.dart';
+import 'package:kam/features/notifications/presentation/providers/notification_delivery_providers.dart';
 import 'package:kam/features/privacy/domain/models/sharing_category.dart';
 import 'package:kam/features/rules/data/repositories/in_memory_rule_repository.dart';
 import 'package:kam/features/rules/domain/models/rule.dart';
@@ -93,8 +94,15 @@ void main() {
         ],
         child: MaterialApp(
           home: Scaffold(
-            body: SingleChildScrollView(
-              child: RuleInterpretationsSection(now: testNow),
+            body: Consumer(
+              builder: (context, ref, _) {
+                // Delivery is a root concern now; mount it alongside the
+                // section so this test exercises the real pipeline.
+                ref.watch(notificationDeliveryProvider);
+                return SingleChildScrollView(
+                  child: RuleInterpretationsSection(now: testNow),
+                );
+              },
             ),
           ),
         ),

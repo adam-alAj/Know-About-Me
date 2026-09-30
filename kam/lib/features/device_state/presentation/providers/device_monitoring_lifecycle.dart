@@ -33,6 +33,7 @@ class DeviceMonitoringLifecycle extends StatefulWidget {
     required this.child,
     this.activityCollector,
     this.onResume,
+    this.onBackground,
     super.key,
   });
   final DeviceMonitoringController controller;
@@ -44,6 +45,16 @@ class DeviceMonitoringLifecycle extends StatefulWidget {
   /// another trigger. It must not create subscriptions: a resumed application
   /// must never end up with two listeners for the same data (Phase 20 §20, §21).
   final VoidCallback? onResume;
+
+  /// Run once when the application leaves the foreground, *before* monitoring is
+  /// released.
+  ///
+  /// This is where the last observed state is published immediately. The
+  /// synchronization service normally coalesces writes over a short window via a
+  /// timer, and a timer does not run while the process is suspended — so without
+  /// this the final transition (a screen turning off, for example) was observed
+  /// locally and then never reached the partner.
+  final Future<void> Function()? onBackground;
 
   final Widget child;
 
@@ -87,28 +98,34 @@ class _DeviceMonitoringLifecycleState extends State<DeviceMonitoringLifecycle>
       widget.onResume?.call();
       return;
     }
-    if (state == AppLifecycleState.inactive) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
       // `inactive` is a transient loss of focus — a system dialog, the
-      // notification shade, the moments around the screen turning off. It is
-      // not backgrounding, and tearing the observers down here would drop the
-      // very screen transition the application is meant to report. The
-      // observers are released on `hidden`/`paused`/`detached` instead.
+      // notification shade, the moments around the screen turning off — and
+      // `hidden` is the transition immediately before `paused` on Android.
+      // Releasing the observers on either would drop the very screen
+      // transition the application is meant to report. `paused` is the settled
+      // background state and is handled below.
       return;
     }
-    // One bounded read of the display state before releasing the observers, so
-    // a screen-off transition at the moment of backgrounding is still observed
-    // and published. This is event-driven, never a timer (Phase 9, FR-016).
+    // Publish the current state (including the display state) before releasing
+    // the observers. This is event-driven, never a timer (Phase 9, FR-016).
     final token = ++_lifecycleToken;
     unawaited(_captureFinalScreenStateThenStop(token));
   }
 
   Future<void> _captureFinalScreenStateThenStop(int token) async {
+    // Read the whole current state and publish it immediately, before the
+    // observers are released and before the process can be suspended. The
+    // collectors re-read the display state here, so a screen-off transition at
+    // the moment of backgrounding is captured and written straight away rather
+    // than being left to a coalescing timer that will not fire while suspended.
     try {
-      await widget.activityCollector?.refresh();
+      await widget.onBackground?.call();
     } catch (_) {
-      // A failed read must never block releasing the platform observers.
+      // A failed publish must never block releasing the platform observers.
     }
-    // A resume that happened while the read was in flight has superseded this
+    // A resume that happened while the publish was in flight has superseded this
     // stop; cancelling now would tear down the subscription it just started.
     if (token != _lifecycleToken) return;
     await widget.controller.stopMonitoring();

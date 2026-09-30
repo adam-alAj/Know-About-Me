@@ -66,10 +66,14 @@ void main() {
     // would drop screen transitions before they could be reported.
     final repository = _CountingRepository();
     final controller = DeviceMonitoringController(repository);
+    var backgrounded = 0;
 
     await tester.pumpWidget(
       DeviceMonitoringLifecycle(
         controller: controller,
+        onBackground: () async {
+          backgrounded++;
+        },
         child: const SizedBox.shrink(),
       ),
     );
@@ -81,8 +85,39 @@ void main() {
     observer.didChangeAppLifecycleState(AppLifecycleState.inactive);
     await tester.pumpAndSettle();
 
+    expect(backgrounded, 0);
     expect(repository.cancellations, 0);
     expect(repository.subscriptions, 1);
+  });
+
+  testWidgets('backgrounding publishes the final state before releasing', (
+    tester,
+  ) async {
+    // A screen turning off is observed exactly as the app backgrounds. The
+    // state must be published here, before the process can be suspended,
+    // because a coalesced timer never fires while suspended.
+    final repository = _CountingRepository();
+    final controller = DeviceMonitoringController(repository);
+    var backgrounded = 0;
+
+    await tester.pumpWidget(
+      DeviceMonitoringLifecycle(
+        controller: controller,
+        onBackground: () async {
+          backgrounded++;
+        },
+        child: const SizedBox.shrink(),
+      ),
+    );
+
+    final observer =
+        tester.state(find.byType(DeviceMonitoringLifecycle))
+            as WidgetsBindingObserver;
+    observer.didChangeAppLifecycleState(AppLifecycleState.paused);
+    await tester.pumpAndSettle();
+
+    expect(backgrounded, 1);
+    expect(repository.cancellations, 1);
   });
 }
 

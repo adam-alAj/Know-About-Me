@@ -97,7 +97,7 @@ void main() {
       ],
     );
 
-    expect(find.text('No partner device details are shared'), findsOneWidget);
+    expect(find.text('Nothing is shared yet'), findsOneWidget);
     expect(find.text('Choose what I share'), findsOneWidget);
     expect(find.text('72% · stale'), findsNothing);
     expect(find.text('Battery'), findsNothing);

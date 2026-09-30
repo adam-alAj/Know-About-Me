@@ -26,7 +26,6 @@ import '../../device_state/presentation/providers/device_state_providers.dart';
 import '../../device_state/presentation/widgets/activity_summary_card.dart';
 import '../../device_state/presentation/widgets/location_summary_card.dart';
 import '../../device_state/presentation/widgets/partner_location_actions.dart';
-import '../../device_state/presentation/widgets/partner_sync_card.dart';
 import '../../history/presentation/recent_history_preview.dart';
 import '../../pairing/domain/models/pair_membership.dart';
 import '../../pairing/presentation/providers/pairing_providers.dart';
@@ -239,9 +238,7 @@ class _LocalDeviceOverview extends ConsumerWidget {
                 const Text('Battery state temporarily unavailable.'),
           ),
         ),
-        const SizedBox(height: AppSpacing.sm),
-        AppCard(
-          child: network.when(
+        const SizedBox(height: AppSpacing.sm),        AppCard(child: network.when(
             data: (state) => _LocalNetworkSummary(state: state, now: now),
             loading: () => const Text('Reading local network state…'),
             error: (_, _) =>
@@ -252,8 +249,6 @@ class _LocalDeviceOverview extends ConsumerWidget {
         const AppCard(child: ActivitySummaryCard()),
         const SizedBox(height: AppSpacing.sm),
         const AppCard(child: LocationSummaryCard()),
-        const SizedBox(height: AppSpacing.sm),
-        const AppCard(child: PartnerSyncCard()),
       ],
     );
   }
@@ -375,16 +370,12 @@ class _PartnerHeader extends StatelessWidget {
           if (isFromCache)
             const Padding(
               padding: EdgeInsets.only(top: AppSpacing.sm),
-              child: Text(
-                'Showing the latest cached state. It may not reflect the current device.',
-              ),
+              child: Text('Showing cached data.'),
             ),
           if (connectionFromCache && !isFromCache)
             const Padding(
               padding: EdgeInsets.only(top: AppSpacing.sm),
-              child: Text(
-                'Connection status is cached. It may have changed while offline.',
-              ),
+              child: Text('Connection status is cached.'),
             ),
         ],
       ),
@@ -416,9 +407,10 @@ class _PartnerContent extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           AppInlineMessage(
-            title: 'No partner device details are shared',
+            title: 'Nothing is shared yet',
             message:
-                'Your partner has not enabled any sharing categories yet, or they paused sharing. On their device they choose categories under Privacy, in “What you share”. Nothing is shared by default, so each person decides what the other can see.',
+                'Your partner has not shared anything yet. They choose what to '
+                'share under Privacy.',
             tone: AppMessageTone.info,
           ),
           const SizedBox(height: AppSpacing.sm),
@@ -479,6 +471,7 @@ class _PartnerMetrics extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final canShowBattery = sharing.shares(SharingCategory.battery);
+
     final canShowCharging = sharing.shares(SharingCategory.charging);
     final canShowNetwork = sharing.shares(SharingCategory.network);
     final canShowActivity = sharing.shares(SharingCategory.activityIndicators);
@@ -855,11 +848,11 @@ String _availabilityLabel(StateObservation<Object?> observation) {
   return switch (observation.availability) {
     CapabilityAvailability.available ||
     CapabilityAvailability.unknown => 'Unknown',
-    CapabilityAvailability.unavailable => 'Unavailable or not shared',
-    CapabilityAvailability.unsupported => 'Not available on this device',
-    CapabilityAvailability.permissionDenied => 'Permission not granted',
-    CapabilityAvailability.serviceDisabled => 'Location service is disabled',
-    CapabilityAvailability.error => 'Temporarily unavailable',
+    CapabilityAvailability.unavailable => 'Not shared',
+    CapabilityAvailability.unsupported => 'Unsupported',
+    CapabilityAvailability.permissionDenied => 'Permission required',
+    CapabilityAvailability.serviceDisabled => 'Location off',
+    CapabilityAvailability.error => 'Unavailable',
     CapabilityAvailability.stale => 'Stale',
   };
 }
@@ -875,7 +868,7 @@ String _enumLabel(String value) => value
 String _freshnessLabel(DataFreshness value) => switch (value) {
   DataFreshness.fresh => 'Fresh',
   DataFreshness.recent => 'Recently updated',
-  DataFreshness.stale => 'Stale · may be outdated',
+  DataFreshness.stale => 'Stale',
   DataFreshness.unknown => 'Unknown',
 };
 
@@ -920,9 +913,9 @@ String _localObservation<T>(
     CapabilityAvailability.available ||
     CapabilityAvailability.unknown => 'Unknown',
     CapabilityAvailability.unavailable => 'Unavailable',
-    CapabilityAvailability.unsupported => 'Unsupported on this device',
-    CapabilityAvailability.permissionDenied => 'Permission not granted',
-    CapabilityAvailability.serviceDisabled => 'Service disabled',
+    CapabilityAvailability.unsupported => 'Unsupported',
+    CapabilityAvailability.permissionDenied => 'Permission required',
+    CapabilityAvailability.serviceDisabled => 'Service off',
     CapabilityAvailability.error => 'Temporarily unavailable',
     CapabilityAvailability.stale => 'Stale',
   };

@@ -35,10 +35,10 @@ class ConnectionIndicator extends StatelessWidget {
   static const String connectedLabel = 'Connected';
 
   /// Shown while the last evidence says the backend is unreachable.
-  static const String offlineLabel = 'Offline — showing last known data';
+  static const String offlineLabel = 'Offline';
 
   /// Shown when a write failed for a reason that may fix itself.
-  static const String retryingLabel = 'Not saved yet — retrying';
+  static const String retryingLabel = 'Retrying';
 
   /// Shown while a reconnection is still being caught up on.
   static const String catchingUpLabel = 'Catching up…';
@@ -50,7 +50,7 @@ class ConnectionIndicator extends StatelessWidget {
   static const String waitingLabel = 'Waiting to sync';
 
   /// Shown when the backend refused the work permanently.
-  static const String blockedLabel = 'Permission required to sync';
+  static const String blockedLabel = 'Permission required';
 
   /// The label for [status], or `null` when there is nothing honest to say.
   ///

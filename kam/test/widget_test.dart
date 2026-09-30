@@ -14,17 +14,13 @@ void main() {
     expect(find.byType(NavigationBar), findsOneWidget);
   });
 
-  testWidgets('dashboard includes the local technical observations section', (
-    tester,
-  ) async {
+  testWidgets('dashboard includes the local device section', (tester) async {
     await pumpTestApp(tester);
 
-    // Local observations are rendered in the lower section of the dashboard.
-    // Their platform-specific state can be Unavailable or Unsupported rather
-    // than the legacy generic "Unknown" label.
-    final observationHeading = find.text(
-      'Activity and availability (technical observations)',
-    );
+    // The user-facing device summary is rendered in the lower section of the
+    // dashboard. Its platform-specific state can be Unavailable or Unsupported
+    // rather than a misleading default.
+    final observationHeading = find.text('Screen and activity');
     final dashboardList = find.byType(ListView).first;
     for (
       var attempt = 0;
@@ -42,12 +38,9 @@ void main() {
   ) async {
     await pumpTestApp(tester);
 
-    // The dashboard now carries the Phase 9-11 cards, so the partner section
-    // sits below the initial viewport of the ListView. This build has no
-    // Firebase, so the honest statement is that nothing is synchronized at all.
-    final partnerStatus = find.textContaining(
-      'Synchronization is unavailable in this build',
-    );
+    // This build has no Firebase and no pair, so the honest statement is that
+    // there is no active connection — not an invented partner value.
+    final partnerStatus = find.text('No active connection');
     await tester.scrollUntilVisible(
       partnerStatus,
       240,

@@ -10,6 +10,7 @@ import '../features/device_state/presentation/providers/device_state_providers.d
 import '../features/device_state/presentation/providers/device_monitoring_lifecycle.dart';
 import '../features/device_state/presentation/providers/sync_providers.dart';
 import '../features/history/presentation/history_providers.dart';
+import '../features/notifications/presentation/providers/notification_delivery_providers.dart';
 
 /// The root widget of the application.
 ///
@@ -33,6 +34,9 @@ class KamApp extends ConsumerWidget {
     // app rather than with one screen. It is inert without an active pair.
     ref.watch(deviceStateSyncCoordinatorProvider);
     ref.watch(historyEventListenersProvider);
+    // Notification delivery is mounted here, not in a screen, so a matched rule
+    // can reach the user from any branch of the app.
+    ref.watch(notificationDeliveryProvider);
 
     return DeviceMonitoringLifecycle(
       controller: ref.watch(deviceMonitoringControllerProvider),
@@ -44,6 +48,16 @@ class KamApp extends ConsumerWidget {
         // (Phase 20 §20, §21).
         ref.read(connectionStatusProvider.notifier).refresh();
         ref.read(deviceStateSyncCoordinatorProvider)?.reassertLatest();
+      },
+      onBackground: () async {
+        // Collect the current state (including the display state) and publish it
+        // now, before the process can be suspended. Coalesced writes are
+        // timer-driven and would otherwise be lost while the app is backgrounded,
+        // which is why a screen turning off never reached the partner.
+        final snapshot = await ref
+            .read(deviceMonitoringControllerProvider)
+            .collectNow();
+        await ref.read(deviceStateSyncCoordinatorProvider)?.publishNow(snapshot);
       },
       child: MaterialApp.router(
         title: 'Know About Me',

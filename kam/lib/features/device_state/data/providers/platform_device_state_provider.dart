@@ -61,7 +61,8 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
   @override
   Future<DeviceStateSnapshot> getCurrentState() async {
     final collectedAt = clock().toUtc();
-    logger.info('Device state collection started');
+    // Collection runs on every refresh and stream start. Routine progress is
+    // deliberately not logged: only genuine failures are, below.
     final observations = <DeviceMetric, StateObservation<Object?>>{};
     for (final capability in DeviceMetric.values) {
       // Without a battery collector, retain Phase 6's generic adapter path so
@@ -77,12 +78,6 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
       try {
         final observation = await adapter.collect(capability);
         observations[capability] = observation;
-        if (observation.availability != CapabilityAvailability.available) {
-          logger.info('Device capability is not currently available', context: {
-            'capability': capability.name,
-            'availability': observation.availability.name,
-          });
-        }
       } catch (error) {
         logger.warning('Device capability collection failed', context: {
           'capability': capability.name,
@@ -114,9 +109,6 @@ class PlatformDeviceStateProvider implements DeviceStateProvider {
     final location = locationCollector == null
         ? null
         : await locationCollector!.refresh();
-    logger.info('Device state collection completed', context: {
-      'capabilityCount': observations.length,
-    });
     final snapshot = DeviceStateSnapshot(
       deviceId: await deviceId(),
       userId: userId(),
