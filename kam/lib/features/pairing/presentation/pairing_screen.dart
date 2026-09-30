@@ -39,6 +39,18 @@ class _PairingScreenState extends ConsumerState<PairingScreen> {
       appBar: AppBar(title: const Text('Pairing & consent')),
       body: ListView(padding: const EdgeInsets.all(20), children: [
         const Text('Connect with someone you trust. Device information stays private until both people consent. Either person can disconnect at any time.'),
+        if (repo == null) ...[
+          const SizedBox(height: 16),
+          const Card(
+            child: ListTile(
+              leading: Icon(Icons.cloud_off_outlined),
+              title: Text('Connection service unavailable'),
+              subtitle: Text(
+                'This build is not connected to Firebase. Pairing and partner state need a configured Firebase project and an internet connection.',
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
         FilledButton.icon(onPressed: repo == null || uid == null || _busy ? null : () => _run(() async {
           final code = await repo.createInvitation(uid);

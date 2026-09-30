@@ -23,7 +23,9 @@ import 'unknown_route_screen.dart';
 /// The shell hosts the primary destinations as branches so each keeps its own
 /// navigation state. Authentication-aware navigation is supplied through
 /// [redirect] (a pure function from `AuthRedirect`) plus a [refreshListenable]
-/// that fires whenever the authentication state changes.
+/// that fires whenever the authentication state changes. Partner connection
+/// management is a persistent shell destination so pairing is always easy to
+/// reach.
 ///
 /// ```text
 /// Splash → Sign in / Create account        (unauthenticated)
@@ -75,6 +77,15 @@ GoRouter createAppRouter({
           StatefulShellBranch(
             routes: [
               GoRoute(
+                path: AppRoutes.pairingPath,
+                name: AppRoutes.pairing,
+                builder: (context, state) => const PairingScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
                 path: AppRoutes.rulesPath,
                 name: AppRoutes.rules,
                 builder: (context, state) => const RulesScreen(),
@@ -120,8 +131,6 @@ GoRouter createAppRouter({
         name: AppRoutes.profile,
         builder: (context, state) => const ProfileScreen(),
       ),
-      GoRoute(path: AppRoutes.pairingPath, name: AppRoutes.pairing,
-        builder: (context, state) => const PairingScreen()),
     ],
     errorBuilder: (context, state) =>
         UnknownRouteScreen(uri: state.uri.toString()),

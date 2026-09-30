@@ -22,7 +22,7 @@ abstract final class AppRoutes {
   static const String ruleCreate = 'rule-create';
   static const String ruleEdit = 'rule-edit';
 
-  // Reserved for the pairing phase; declared now so guards can reference it.
+  // Partner invitation, consent, and connection management.
   static const String pairing = 'pairing';
 
   static const String splashPath = '/splash';

@@ -141,7 +141,7 @@ class _PartnerReassuranceDashboardState
               const SizedBox(height: AppSpacing.lg),
               AppButton.secondary(
                 label: 'Manage connection and sharing',
-                onPressed: () => context.pushNamed(AppRoutes.pairing),
+                onPressed: () => context.goNamed(AppRoutes.pairing),
               ),
             ],
             const SizedBox(height: AppSpacing.xl),
@@ -757,7 +757,7 @@ class _ConnectionEmptyState extends StatelessWidget {
           const SizedBox(height: AppSpacing.md),
           AppButton.secondary(
             label: pending ? 'Review connection' : 'Connect with partner',
-            onPressed: () => context.pushNamed(AppRoutes.pairing),
+            onPressed: () => context.goNamed(AppRoutes.pairing),
           ),
         ],
       ),

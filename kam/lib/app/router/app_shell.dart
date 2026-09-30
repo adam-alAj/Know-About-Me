@@ -43,6 +43,11 @@ class AppShell extends StatelessWidget {
                 label: 'Home',
               ),
               NavigationDestination(
+                icon: Icon(Icons.people_outline),
+                selectedIcon: Icon(Icons.people),
+                label: 'Connect',
+              ),
+              NavigationDestination(
                 icon: Icon(Icons.rule_outlined),
                 selectedIcon: Icon(Icons.rule),
                 label: 'Rules',
