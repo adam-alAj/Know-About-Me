@@ -267,7 +267,8 @@ configuration, and app/test commands. Use [production deployment](../deployment/
 and the [release checklist](../deployment/PRODUCTION_RELEASE_CHECKLIST.md) for
 Firebase safeguards, signed builds, install/smoke process and rollback. Current
 application ID and namespace are `com.aj.kam`, version is `1.0.0+1`, launcher label is
-`Know About Me`, and the launcher image is the Flutter template icon. The package identity,
+`Know About Me`, and the Android density/adaptive launcher icons use the supplied
+gold emblem stored at `assets/branding/kam-logo.jpg`. The package identity,
 branding, distribution method and production Firebase target need confirmation.
 Release signing requires environment-sourced keystore settings; no release
 artifact was produced.

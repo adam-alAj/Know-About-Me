@@ -38,8 +38,9 @@ release gate below is resolved and evidenced.
 - [ ] Verify the selected package ID `com.aj.kam` matches the Firebase Android
   client configuration in the build environment. Changing it after distribution
   creates a separate Android app and needs a matching Firebase registration.
-- [ ] Confirm launcher artwork and store metadata. The configured display name is
-  `Know About Me`; the launcher artwork is the Flutter template icon.
+- [ ] Verify launcher icon rendering and prepare store metadata. The configured
+  display name is `Know About Me`; Android launcher icons use the supplied gold
+  emblem in `assets/branding/kam-logo.jpg`.
 - [ ] Confirm release version name/code. Current `pubspec.yaml` value is
   `1.0.0+1`; increment the build number for each distributed build.
 - [ ] Create/choose a protected upload keystore and store it outside the repo.

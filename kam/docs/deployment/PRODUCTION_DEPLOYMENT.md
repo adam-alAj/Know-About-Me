@@ -50,8 +50,9 @@ deployment before release.
   by Git and must be supplied in each build environment. Changing the ID after
   distribution requires a new Firebase Android registration and installs as a
   distinct Android package.
-- Current label: `Know About Me`; launcher artwork is still the Flutter template icon,
-  and no production branding asset was identified in the asset directory.
+- Current label: `Know About Me`; Android density and adaptive launcher icons use
+  `assets/branding/kam-logo.jpg`. Verify icon rendering on target devices before
+  distribution.
 - Current version: `1.0.0+1` (`versionName`/`versionCode` from Flutter values).
 - Main manifest permissions: Internet, network state, coarse/fine foreground
   location, and notifications. There is no background location or foreground
