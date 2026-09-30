@@ -1,69 +1,91 @@
 # Know About Me (`kam`)
 
-A private, consent-based reassurance app for two people who are physically separated. It shows an authorized view of observed device state and user-defined rule interpretations. It is not a messaging, social, or tracking app.
+Know About Me is a private, consent-based Android app for two people who want a
+limited view of each other's observed device state and user-defined
+reassurance rules. It is not a messaging, social, or continuous tracking app.
 
-## Project status
+## Scope and current status
 
-The repository contains the Phase 20 offline and stale-data implementation and Phase 21 Android compatibility hardening changes. Runtime validation for these phases is still outstanding in the current environment. See the [Phase 21 completion report](docs/PHASE_21_COMPLETION_REPORT.md).
+- **Platform:** Android is the only supported target. iOS folders are project
+  scaffolding, not supported or validated builds.
+- **Users:** a pair has exactly two members; device visibility requires mutual
+  consent and category-specific sharing.
+- **Backend:** Firebase Authentication and Cloud Firestore with Firestore
+  Security Rules. The architecture is intended for Firebase Spark; it has no
+  Cloud Functions, Cloud Run, Scheduler, Pub/Sub, or custom backend.
+- **Release status:** BLOCKED. Phase 26 end-to-end validation and Phase 27
+  release validation could not complete. No production artifact or two-user
+  device acceptance is claimed. See [Phase 26](docs/PHASE_26_COMPLETION_REPORT.md)
+  and [Phase 27](docs/PHASE_27_COMPLETION_REPORT.md).
 
-Android is the only supported runtime target. The `ios/` directory and generated iOS Firebase options remain scaffolding; iOS runtime collection is not implemented or validated. See the [Android compatibility and limitations](docs/platform/ANDROID_COMPATIBILITY_AND_LIMITATIONS.md).
+## Main capabilities
 
-The backend targets the Firebase Spark plan and does not require Cloud Functions or Cloud Run. See [Spark-only architecture](docs/architecture/SPARK_ONLY_ARCHITECTURE.md) and the [Spark compatibility checklist](docs/SPARK_COMPATIBILITY_CHECKLIST.md).
+- Email/password authentication and user profile/preferences.
+- Pairing codes, explicit mutual consent, pause/resume, and disconnect/revoke.
+- Android battery/charging, network, display/activity, and foreground location
+  observations, subject to Android permissions and lifecycle limits.
+- Change-aware Firestore synchronization, freshness-aware partner state, and
+  owner/pair/category authorization.
+- Local rule evaluation, cautious interpretations, generic local notifications,
+  and owner-scoped meaningful event history.
 
-## Requirements
+Unknown, stale, unsupported, and unavailable values remain distinct. Network
+loss, app suspension, or lack of activity evidence never means a phone is off or
+a person is inactive.
 
-- Flutter 3.44.8 (repository configuration; use `flutter --version` to check the installed SDK)
-- Dart `^3.12.2`
-- Android SDK and JDK 17 for Android builds
-- Node.js and Firebase CLI only for Firestore rules and emulator tests
+## Prerequisites
 
-## Getting started
+The repo records Flutter 3.44.8, Dart `^3.12.2`, Java bytecode target 17, and
+Android min/compile/target API 24/36/36. These values have not all been verified
+with a successful current build. Install Flutter, a compatible JDK and Android
+SDK; install Node/npm and Firebase CLI only if running Firestore emulator tests.
+See the [developer setup guide](docs/project/DEVELOPER_SETUP.md).
 
-```bash
+## Quick start
+
+From this package directory:
+
+```powershell
 flutter pub get
 flutter run
 ```
 
-Useful commands:
+**Firebase target warning:** normal app bootstrap opts into the generated
+`DefaultFirebaseOptions`, which currently point to `gendersocialapp`, even when
+`APP_ENV=development`. `APP_ENV` selects logging/environment behavior; it does
+not select a Firebase project. Do not use the default run for test data unless
+you have confirmed that project is safe to use. For local work, configure the
+Firestore/Auth emulators as described in the [developer setup guide](docs/project/DEVELOPER_SETUP.md).
 
-```bash
+## Quality and build commands
+
+```powershell
 flutter analyze
 flutter test
-dart format --output=none --set-exit-if-changed .
 flutter build apk --debug
 ```
 
-## Firebase configuration
+Firestore Rules tests use the isolated `demo-kam` emulator project:
 
-Configuration is supplied with `--dart-define` (see [configuration strategy](docs/decisions/ADR-004-configuration-strategy.md) and [Firebase architecture](docs/architecture/FIREBASE_ARCHITECTURE.md)):
-
-```bash
-flutter run --dart-define=APP_ENV=development --dart-define=ENABLE_VERBOSE_LOGGING=true
+```powershell
+firebase emulators:exec --project demo-kam --only firestore "npm --prefix firebase test"
 ```
 
-Required Firebase values must be supplied together. With no values, remote reads remain explicitly unavailable. Firebase options are provided by the app; a committed `google-services.json` is not required.
+These commands have not completed successfully in the current execution
+environment. The latest outcome is in the [Phase 28 report](docs/PHASE_28_COMPLETION_REPORT.md).
 
-Never place server credentials in `--dart-define`; client values are public by construction.
+## Production build
 
-## Architecture
+Release builds require protected signing material supplied with `KAM_RELEASE_*`
+environment variables; no debug signing fallback is configured. Do not commit
+the keystore or passwords. The permanent Android package ID and production
+Firebase target still require confirmation. Follow
+[production deployment](docs/deployment/PRODUCTION_DEPLOYMENT.md) only after
+reviewing the [release checklist](docs/deployment/PRODUCTION_RELEASE_CHECKLIST.md).
 
-The app is organized by feature under `lib/features/`, with shared services under `lib/core/`. Feature code uses domain, data, and presentation layers; domain code remains pure Dart. Tests and architecture checks are under `test/`. Android native code is under `android/`.
+## Documentation
 
-## Known limitations
-
-- No live Firebase project is configured in this checkout, so remote reads are unavailable without compile-time Firebase settings.
-- Android collectors are best effort while the app process is active. Background execution can be delayed or stopped by Android and device manufacturers.
-- Location collection is foreground-only; background location and continuous background collection are not implemented.
-- Charging duration is process-local and is not preserved across app restarts.
-- Analysis, test, APK build, and device validation for Phase 21 remain pending; see the [completion report](docs/PHASE_21_COMPLETION_REPORT.md).
-
-## Key documentation
-
-- [Architecture](docs/architecture/ARCHITECTURE.md)
-- [Security and authorization](docs/security/SECURITY_AND_AUTHORIZATION.md)
-- [Privacy and sharing lifecycle](docs/privacy/PRIVACY_SHARING_AND_CONNECTION_LIFECYCLE.md)
-- [Offline, stale data, and recovery](docs/reliability/OFFLINE_STALE_DATA_AND_RECOVERY.md)
-- [Platform capabilities](docs/platform/PLATFORM_CAPABILITIES.md)
-- [Android compatibility and limitations](docs/platform/ANDROID_COMPATIBILITY_AND_LIMITATIONS.md)
-- [UI/UX and accessibility](docs/ui/UI_UX_AND_ACCESSIBILITY.md)
-- [Requirements mapping](docs/requirements/REQUIREMENT_MAPPING.md)
+Start with the [final project handover](docs/project/FINAL_PROJECT_HANDOVER.md)
+and [documentation index](docs/README.md). They link architecture, security,
+offline recovery, Android limits, testing, performance, observability, and
+deployment documentation.

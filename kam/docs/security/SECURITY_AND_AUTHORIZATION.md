@@ -13,9 +13,10 @@ Companion documents:
 | `docs/pairing/PAIRING_SYSTEM.md` | Pairing UX and its limits |
 | `docs/PARTNER_REASSURANCE_DASHBOARD.md` (ui) | What the dashboard renders |
 
-The enforcement boundary is **`firestore.rules`** (deployed from `kam/firestore.rules`,
-mirrored at `kam/firebase/firestore.rules`). The rules are backed by **114 emulator
-tests** in `kam/firebase/test/firestore.rules.test.js`.
+The enforcement boundary is **`firestore.rules`** (configured as the root
+deployment file, mirrored at `firebase/firestore.rules`). Phase 19 historically
+reported **114 passing emulator tests** in `firebase/test/firestore.rules.test.js`;
+current emulator validation is BLOCKED and must not be inferred from that count.
 
 ---
 
@@ -458,11 +459,13 @@ The rules are verified by the Firestore Emulator with the real rules loaded. Run
 
 ```bash
 cd kam
-firebase emulators:exec --only firestore "npm --prefix firebase test"
+firebase emulators:exec --project demo-kam --only firestore "npm --prefix firebase test"
 ```
 
-`demo-kam` is a `demo-` prefixed project id: no account, no credentials, local
-data only.
+The Rules test suite initializes contexts with `demo-kam`; specify it explicitly
+so Firebase CLI does not inherit the repository's `gendersocialapp` default.
+Emulator validation is local and does not validate production deployment. The
+Phase 19 test count recorded below is historical; current execution is blocked.
 
 | # | Scenario | Expected |
 | --- | --- | --- |

@@ -114,7 +114,7 @@ extension AppLoggerConvenience on AppLogger {
 /// and because it can be silenced by raising [minimumLevel] in production.
 class DeveloperAppLogger implements AppLogger {
   const DeveloperAppLogger({
-    this.name = 'kam',
+    this.name = 'know_about_me',
     this.minimumLevel = LogLevel.debug,
     this.includeErrorDetails = true,
   });

@@ -1,93 +1,70 @@
-> **Phase 21 platform contract:** Android is the only supported runtime target. iOS and other non-Android targets are unsupported and unvalidated; older platform-specific implementation descriptions below are historical and must not be used as the current support contract. See [Android compatibility and limitations](../platform/ANDROID_COMPATIBILITY_AND_LIMITATIONS.md).`r`n`r`n# Platform Capability Matrix
+# Platform Capabilities — Current Android Contract
 
-What Android and iOS **actually permit** for each capability the SRS mentions.
-Phase 1 produces no monitoring code; this matrix is the contract later phases
-must respect. Flutter does not remove platform restrictions (SRS constraint 7).
+**Supported runtime:** Android only. Other Flutter targets and iOS-specific
+folders/options are scaffolding; they are not supported or validated product
+targets. This matrix is based on the current Android manifest, Kotlin
+`MainActivity`, Dart adapters/collectors, and
+[`ANDROID_COMPATIBILITY_AND_LIMITATIONS.md`](ANDROID_COMPATIBILITY_AND_LIMITATIONS.md).
+Runtime device validation is still BLOCKED; see the Phase 26 and 27 reports.
 
-Legend for **Reliable?**:
+## Capability matrix
 
-- **Yes** — observable whenever the app has the permission and is running.
-- **Partial** — observable, but the OS may delay, batch or suspend collection;
-  the app must therefore report age/staleness rather than assume currency.
-- **No** — the platform does not expose it; the metric must be modelled as
-  *unsupported* (FR-068).
+| Capability | Current Android implementation | Permission | Semantics and limits |
+| --- | --- | --- | --- |
+| Battery level | Android battery APIs and native bridge | None | Snapshot/event-driven, normalized 0–100 when available; unknown/error remain explicit. |
+| Charging | Android battery broadcast/native bridge | None | Charging, not charging, full, or unknown. Charging duration is based on observed transitions and is not preserved across process restart. |
+| Network | `ConnectivityManager` callback and `NetworkCapabilities` | `ACCESS_NETWORK_STATE` | Transport and OS-validated Internet path are observations; neither proves Firebase availability. No network does not mean phone off. |
+| Display/activity | Display state plus app/native observation bridge | None | Screen/display state and app activity are limited observations. Screen off is not sleep; no evidence is not inactivity. OEM/lifecycle gaps are possible. |
+| Device availability | Derived from successful sync/last-seen observations | None | Active/recent/offline/unknown indicate reachability evidence only, not physical power state. |
+| Foreground location | Native `LocationManager` bridge | Coarse and/or fine location, requested contextually | Foreground only. Approximate accuracy, service state, denial, and stale time must be represented. No background collection. |
+| Notifications | Local native notification channel (`Rule alerts`) through MethodChannel | `POST_NOTIFICATIONS` on Android 13+; app settings also apply | Local delivery is best effort. Generic title/body; no partner details in lock-screen text. No FCM or remote push. Delivery requires actual device validation. |
+| App lifecycle | Flutter lifecycle owner and Android Activity lifecycle | None | Monitoring stops/refreshes around lifecycle changes. Android may suspend or kill background work; no 24/7 guarantee. |
 
-## 1. Summary table
+## Permission and sharing are separate
 
-| Capability | Android | iOS | Reliable? | Required Permission? | Notes |
-| --- | --- | --- | --- | --- | --- |
-| Battery percentage | `BatteryManager.BATTERY_PROPERTY_CAPACITY`, `ACTION_BATTERY_CHANGED` (sticky) | `UIDevice.batteryMonitoringEnabled` + `batteryLevel` | Yes | No | `batteryLevel` is `-1` when monitoring is disabled → treat as unknown. |
-| Charging state | `BatteryManager.isCharging`, `EXTRA_STATUS` | `UIDevice.batteryState` | Yes | No | Distinguish charging / not charging / full. |
-| Charging duration | Derived from observed start/stop transitions | Derived from observed start/stop transitions | Partial | No | Correct only while transitions are observed. Never assume charging continued while state was unknown (FR-010). |
-| Battery state changes | `ACTION_BATTERY_CHANGED` / `ACTION_POWER_CONNECTED/DISCONNECTED` | KVO on `batteryLevel`/`batteryState` | Partial | No | Background delivery depends on the app being alive or scheduled. |
-| Network connectivity | `ConnectivityManager` + default `NetworkCallback` | `NWPathMonitor` | Yes | Android: `ACCESS_NETWORK_STATE` | Phase 8 local path observation; does not include private network identifiers. |
-| Internet reachability | `NET_CAPABILITY_VALIDATED` | Not exposed by `NWPathMonitor` | Partial | Android: `ACCESS_NETWORK_STATE` | iOS remains unknown; Android validation is OS evidence, not Firebase reachability. |
-| Online / offline (local path) | Validated default route | Satisfied network path | Partial | Android: `ACCESS_NETWORK_STATE` | Local OS-path semantics only; Firebase/backend availability remains separate. |
-| Last online timestamp | Last locally observed online path | Last locally observed satisfied path | Partial | Android: `ACCESS_NETWORK_STATE` | Local historical observation, not proof of continuous phone power or usage. |
-| Offline duration | Observed online-to-offline transition | Observed satisfied-to-unsatisfied transition | Partial | Android: `ACCESS_NETWORK_STATE` | Unknown after restart/lifecycle gaps; never derived from data age. |
-| Screen / activity state | `ACTION_SCREEN_ON/OFF` only while a receiver is registered; `UsageStatsManager` approximations | **Not available** | No | Android: `PACKAGE_USAGE_STATS` (special) | iOS exposes no screen on/off API. Model as *unsupported* on iOS. |
-| App activity (own app) | `ProcessLifecycleOwner` | `UIApplication` lifecycle | Yes | No | Only the app's own foreground/background state; says nothing about the phone's screen. |
-| Last activity timestamp | Derived from own app lifecycle / device events | Derived from own app lifecycle | Partial | No | Must be described as "last *observable* activity" (FR-017). |
-| Foreground location | `FusedLocationProviderClient` | `CLLocationManager` (when-in-use) | Yes | Android: `ACCESS_FINE`/`ACCESS_COARSE_LOCATION`; iOS: `NSLocationWhenInUseUsageDescription` | Accuracy is reported and must be surfaced (FR-020). |
-| Background location | `ACCESS_BACKGROUND_LOCATION` + location foreground service (Android 10+) | "Always" authorization, background `location` mode, significant-change / region monitoring | Partial | Android: `ACCESS_BACKGROUND_LOCATION`; iOS: `NSLocationAlwaysAndWhenInUseUsageDescription` | OS may delay or suspend; significant-change updates are coarse. Never imply continuous tracking. |
-| Home / away classification | Derived from last known location + configured radius | Derived from last known location + configured radius | Partial | Same as location | Classification is only as current as the location it is derived from. |
-| Distance from home | Derived (haversine) | Derived (haversine) | Partial | Same as location | Must be labelled approximate when the location is approximate or stale (FR-023). |
-| Device reachability / availability | Derived from last successful sync | Derived from last successful sync | Yes | No | Classify as active / recently seen / offline / unknown (FR-015). |
-| Device power-off detection | **Not available** | **Not available** | No | — | Apps cannot reliably observe shutdown (Android `ACTION_SHUTDOWN` is not guaranteed to complete work; iOS has no API). **Never** claim powered off (FR-015, FR-070). |
-| Background execution | `WorkManager` (periodic, min ~15 min), foreground services | `BGTaskScheduler` (`BGAppRefreshTask`, `BGProcessingTask`) | Partial | No | Timing is opportunistic, not guaranteed; Doze/App Standby and Low Power Mode defer work. |
-| Background synchronization | WorkManager + Firestore offline queue | BGTaskScheduler + Firestore offline queue | Partial | No | Must recover and sync on resume (FR-060, NFR-044). |
-| Push notifications | No production implementation; local notifications need a platform plugin and remote push is deferred | Android/iOS notification APIs via a future local plugin | Not implemented | Android 13+: `POST_NOTIFICATIONS`; iOS: user authorization | No alert delivery is claimed. The rule boundary reports unsupported until a platform plugin is added; remote push needs a trusted sender. |
-| App lifecycle | Reliable | Reliable | Yes | No | Used to resync and to timestamp "last seen". |
+OS permission only permits local collection. The signed-in user must separately
+enable the category for the partner, and Firestore Rules enforce that sharing
+decision on remote access. A locally available value is not automatically
+authorized for sharing.
 
-## 2. Capabilities that must be modelled as reduced or unsupported
+The manifest declares Internet, network state, foreground coarse/fine location,
+and notification permission. It does not declare background location or a
+foreground service. Android 13+ notification permission can be denied; earlier
+versions still depend on app/channel settings.
 
-These are the "do not hide problems" cases (SRS constraints 3 and 10). Each is
-representable in the domain model rather than faked:
+## Required state semantics
 
-| Capability | Phase 1 representation |
-| --- | --- |
-| Screen state on iOS | `DataAvailability.unsupported` |
-| Device powered off | *Does not exist as a state.* Only reachability + last-seen time. |
-| Continuous background monitoring | Value retained with its timestamp; freshness becomes `recent`/`stale`. |
-| Continuous location tracking | Last-known location + `accuracyMeters` + freshness. |
-| Charging duration across unknown states | Duration resets/pauses rather than assuming continuation. |
+```text
+UNKNOWN != FALSE
+UNSUPPORTED != FALSE
+STALE != CURRENT
+ERROR != FALSE
+PERMISSION DENIED != UNSUPPORTED
+NO NETWORK != PHONE OFF
+NO FIRESTORE UPDATE != PHONE OFF
+BACKGROUND SUSPENSION != PHONE OFF
+SCREEN OFF != USER SLEEPING
+NO ACTIVITY EVIDENCE != USER INACTIVE
+OS PERMISSION != PARTNER SHARING PERMISSION
+CACHE != CURRENT AUTHORIZATION
+```
 
-## 3. Consequences for the product
+Use a timestamped statement such as “Location updated 2 hours ago”; do not
+present stale data as current or say “currently at home.” Show “unavailable” or
+“last seen” rather than “powered off” without a trustworthy power-state signal;
+this app has no such signal.
 
-1. **Age is part of the value.** Because most background capabilities are only
-   *partial*, every metric carries `observedAt` and is classified as
-   fresh/recent/stale (FR-047, FR-061, NFR-025).
-2. **Platform differences are visible.** The UI must communicate "unsupported on
-   this platform" rather than showing a blank or a guess (NFR-019).
-3. **Battery efficiency is a design constraint.** Prefer event-driven collection
-   and scheduled work over continuous polling (NFR-009, NFR-010, FR-071).
-4. **Notifications are best-effort.** Rule events live in history independently
-   of push delivery (FR-044).
+## Android limitations
 
-## 4. Official references
-
-Android:
-
-- Background work: <https://developer.android.com/develop/background-work/background-tasks>
-- WorkManager: <https://developer.android.com/topic/libraries/architecture/workmanager>
-- BatteryManager: <https://developer.android.com/reference/android/os/BatteryManager>
-- ConnectivityManager: <https://developer.android.com/reference/android/net/ConnectivityManager>
-- Location permissions: <https://developer.android.com/develop/sensors-and-location/location/permissions>
-- Battery optimization / Doze: <https://developer.android.com/training/monitoring-device-state/doze-standby>
-
-Apple:
-
-- Background Tasks: <https://developer.apple.com/documentation/backgroundtasks>
-- `UIDevice.batteryState`: <https://developer.apple.com/documentation/uikit/uidevice/batterystate>
-- Core Location and background updates: <https://developer.apple.com/documentation/corelocation>
-- Requesting location authorization: <https://developer.apple.com/documentation/corelocation/requesting_authorization_to_use_location_services>
-- Background execution limits: <https://developer.apple.com/documentation/uikit/about_the_app_launch_sequence>
-
-Firebase (see also `ADR-002-firebase-boundaries.md`):
-
-- Cloud Messaging delivery: <https://firebase.google.com/docs/cloud-messaging>
-
-> Verified against the platform documentation above. Android behaviour reflects
-> API level 34+ (Android 14); iOS behaviour reflects iOS 17+. Both evolve, so a
-> capability listed as *Partial* or *No* must be re-checked before implementing
-> the corresponding collector in a later phase.
+- Background execution varies by Android version, power state, app standby, and
+  manufacturer policy. Collection/listeners can be delayed or stopped.
+- Battery duration loses continuity across observation gaps/restarts.
+- Network transport/validated reachability does not prove access to Firebase.
+- Location is foreground-only, permission-dependent, and may be approximate or
+  stale; there is no continuous or background location service.
+- Android may terminate the app. Resume triggers re-observation; it cannot
+  recover events the OS never delivered.
+- Notification permission, channel settings, battery policy, and device settings
+  can prevent an alert even when a rule matched.
+- Physical device/API-level permission, lifecycle, and release behavior have not
+  been validated in this environment.

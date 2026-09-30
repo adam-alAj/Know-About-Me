@@ -4,6 +4,15 @@
 - **Date:** 2026-09-26
 - **Phase:** 3
 
+> **Historical status update (Phase 28):** The context and decisions below record
+> the Phase 3 environment and are not a description of current project
+> configuration. Current code uses generated FlutterFire options by default;
+> repository config points to `gendersocialapp`, and `.firebaserc` also defaults
+> to that project. Production intent is unconfirmed. Rules tests use local
+> `demo-kam` and must pass `--project demo-kam`. See the current
+> [Firebase architecture](../architecture/FIREBASE_ARCHITECTURE.md) and
+> [project handover](../project/FINAL_PROJECT_HANDOVER.md).
+
 ## Context
 
 ADR-002 decided to defer Firebase until a foundation existed, and to keep no

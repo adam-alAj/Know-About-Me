@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../config/app_config.dart';
 import '../logging/app_logger.dart';
 
-/// Default emulator ports, matching `firebase.json` in this repository.
+/// Firebase Emulator Suite default service ports used by this app.
 abstract final class FirebaseEmulatorPorts {
   static const int firestore = 8080;
   static const int auth = 9099;

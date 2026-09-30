@@ -1,7 +1,7 @@
 // Firestore Security Rules tests.
 //
 // Run with the Firebase Emulator Suite:
-//   firebase emulators:exec --only firestore "node --test firebase/test/"
+//   firebase emulators:exec --project demo-kam --only firestore "node --test firebase/test/"
 //
 // These tests are the executable specification of docs/architecture/FIREBASE_SECURITY.md.
 // They never touch a real Firebase project: everything runs against the local

@@ -2,19 +2,12 @@ import 'package:firebase_core/firebase_core.dart';
 
 import '../config/app_config.dart';
 
-/// Builds [FirebaseOptions] from [AppConfig].
+/// Builds alternate [FirebaseOptions] from [AppConfig].
 ///
-/// FlutterFire's `flutterfire configure` normally generates a
-/// `firebase_options.dart` file from a real project. That command needs a
-/// Firebase project and credentials, which are not available in this
-/// environment, and fabricating one would be dishonest (see
-/// `docs/PHASE_03_COMPLETION_REPORT.md`, constraint 10).
-///
-/// Instead, options are assembled from client-safe compile-time values, which is
-/// the FlutterFire-supported alternative to bundling `google-services.json`.
-/// This also means the build does not require the `com.google.gms.google-services`
-/// Gradle plugin, and the same binary can target a different environment by
-/// changing `--dart-define` values.
+/// Normal app startup opts into generated FlutterFire options. Complete
+/// client-safe compile-time identifiers override those generated defaults; they
+/// are not privileged credentials. The Android build does not apply the Google
+/// Services Gradle plugin because initialization uses Dart options.
 abstract final class FirebaseConfig {
   /// Whether the configuration is complete enough to initialize Firebase.
   static bool isConfigured(AppConfig config) => config.hasFirebaseConfiguration;

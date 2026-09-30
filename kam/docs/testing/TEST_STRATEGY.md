@@ -11,7 +11,7 @@ Some earlier phase artifacts are missing from this checkout. Available completio
 1. **Unit tests** (`test/unit/`): deterministic domain and mapping logic, including authentication, pairing, device-state normalization, freshness, location/home calculations, rule evaluation, notification eligibility, repository behavior, and cleanup.
 2. **Widget tests** (`test/widget/`): routing, authentication screens, dashboard, rules, rule builder, interpretation, history/data state, and selected privacy interactions. The latest user-provided full run discovered 663 tests, with 662 passing and one privacy-screen test failing before the latest test edits. The corrected test has not been rerun.
 3. **Architecture tests** (`test/architecture/`): domain import boundaries and Spark-only architecture.
-4. **Firebase Security Rules tests** (`firebase/test/firestore.rules.test.js`): run in the Firestore emulator via `firebase emulators:exec --only firestore "npm --prefix firebase test"`. The Phase 19 report records 114/114 passing historically; Phase 23 could not rerun the suite in this environment.
+4. **Firebase Security Rules tests** (`firebase/test/firestore.rules.test.js`): run in the Firestore emulator via `firebase emulators:exec --project demo-kam --only firestore "npm --prefix firebase test"`. Always pass the isolated `demo-kam` project; `.firebaserc` defaults to `gendersocialapp`. The Phase 19 report records 114/114 passing historically; Phases 23/26/28 could not rerun the suite here.
 5. **Android build and manual testing**: debug APK build, permissions, OS lifecycle, accessibility, layout, device-state APIs, and background constraints require the Android SDK/Flutter toolchain plus emulator or physical device.
 6. **Two-user end-to-end testing**: requires two independent signed-in accounts/devices and a configured Firebase test environment. It cannot be inferred from unit/widget tests.
 
@@ -34,7 +34,7 @@ Run from the Flutter package root:
 flutter pub get
 flutter analyze
 flutter test
-firebase emulators:exec --only firestore "npm --prefix firebase test"
+firebase emulators:exec --project demo-kam --only firestore "npm --prefix firebase test"
 flutter build apk --debug
 ```
 

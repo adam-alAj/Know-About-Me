@@ -1,4 +1,16 @@
-> **Phase 21 platform contract:** Android is the only supported runtime target. iOS and other non-Android targets are unsupported and unvalidated; older platform-specific implementation descriptions below are historical and must not be used as the current support contract. See [Android compatibility and limitations](../platform/ANDROID_COMPATIBILITY_AND_LIMITATIONS.md).`r`n`r`n# Requirement Mapping
+# Requirement Mapping
+
+> **Handover note:** The phase plan and Phase 1–2/Phase 2 requirement status
+> tables below are historical planning snapshots, not a current feature-status or
+> release-validation report. Later phases implemented pairing, Android device
+> collectors, location, rules, notifications, history and privacy controls.
+> Current implementation/status is summarized in
+> [`../project/FINAL_PROJECT_HANDOVER.md`](../project/FINAL_PROJECT_HANDOVER.md).
+> The referenced original SRS (`Docs/SRS_DOC.md`) is not present in this checkout.
+
+> **Platform contract:** Android is the only supported runtime target. iOS and
+> other non-Android targets are unsupported and unvalidated. See
+> [Android compatibility](../platform/ANDROID_COMPATIBILITY_AND_LIMITATIONS.md).
 
 Maps every SRS requirement to an implementation domain and the phase in which it
 is planned. Requirement identifiers are the SRS identifiers

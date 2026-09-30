@@ -107,7 +107,7 @@ Phase 20 adds unit/widget coverage for freshness and connection state, lifecycle
 Validation command for rules remains:
 
 ```powershell
-firebase emulators:exec --only firestore "npm --prefix firebase test"
+firebase emulators:exec --project demo-kam --only firestore "npm --prefix firebase test"
 ```
 
 ## 22. Known limitations

@@ -1,4 +1,4 @@
-package com.example.kam
+package com.aj.kam
 
 import android.Manifest
 import android.content.BroadcastReceiver

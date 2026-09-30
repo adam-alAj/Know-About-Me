@@ -60,7 +60,7 @@ Actual Phase 25 commands and results are recorded in [Phase 25 completion report
 - Firebase CLI/npm, a working Android device/emulator, and two independent user accounts were unavailable.
 - No Android Logcat, emulator authorization-denial, offline replay, storage corruption, startup failure, or notification tap after revoke test ran.
 - Production signing configuration is intentionally not provided; signed release delivery remains blocked.
-- Android `applicationId` remains the template value `com.example.kam`; choose and configure the final store package identity before publishing.
+- Android `applicationId` and namespace are `com.aj.kam`; confirm the matching local Firebase client registration is present in every release build environment.
 - There is no remote observability/crash reporting, consistent with Spark-only constraints.
 - The Phase 25 checkout does not contain the original SRS document; `docs/requirements/REQUIREMENT_MAPPING.md` and the Phase reports were inspected instead.
 - Firebase cannot distinguish a duplicate create-only history event write from another permission denial using only the error code. The error is surfaced to local diagnostics and never used to bypass rules.

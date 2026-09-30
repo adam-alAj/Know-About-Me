@@ -1,5 +1,13 @@
 # Architecture
 
+> **Scope note:** This is the Phase 1–4 architecture baseline, not a complete
+> as-built description after later implementation phases. Pairing, monitoring,
+> location, rules UI, history, Android notifications, privacy controls, offline
+> recovery, and production hardening were added later. Use
+> [`../project/FINAL_PROJECT_HANDOVER.md`](../project/FINAL_PROJECT_HANDOVER.md)
+> and focused current documents for implementation status. Phase 2 project and
+> validation statements below are historical.
+
 Mutual Device Presence & Reassurance System. This document describes the
 architecture **as implemented** after Phase 4. Phase 1 built the domain foundation;
 Phase 2 built the application architecture around it; Phase 3 added the Firebase
@@ -435,8 +443,9 @@ never sees a `FirebaseException`, a `DocumentSnapshot` or a collection path.
 | Writing notifications | writes **only into its own** collection | ✅ `isSelf(uid)` on every write |
 | Interpreting state (rules) | ✅ evaluates locally | — (no server exists) |
 
-There is **no server**: the architecture is designed for Firebase Spark and no
-live Firebase project is configured, so there is no Cloud Functions project and no Admin SDK
+There is **no custom server**: the architecture is designed for Firebase Spark.
+Firebase client configuration is present, but production intent is unconfirmed.
+There is no Cloud Functions project and no Admin SDK
 ([ADR-009](../decisions/ADR-009-spark-only-no-cloud-functions.md)). Every former
 server responsibility is instead *verified* by the rules — see
 `SPARK_ONLY_ARCHITECTURE.md`.
@@ -447,13 +456,12 @@ only be written by its own subject), so a modified client still cannot join a
 pair, read a paused/revoked pair, or widen its own sharing. The rules are tested
 against the emulator (70 scenarios, `FIREBASE_SECURITY.md` §7).
 
-### Still not implemented
+### Phase 4 snapshot gaps (later implementation phases)
 
-No pairing/consent *workflow* (Phase 5), no device monitoring (Phase 6), no
-location tracking, no rule management UI, no FCM registration. Authentication and
-profiles were completed in Phase 4. The Spark migration prepared the security
-model those features must obey, so Phase 5 can build the workflow without
-re-architecting the backend.
+The Phase 4 snapshot had not yet implemented pairing/consent workflow, device
+monitoring, location tracking, or rule management UI. Later phases added the
+current app features; remote FCM registration/sending remains intentionally
+unimplemented. This document is retained as the earlier architecture baseline.
 
 Facts and interpretations never mix: `ValueOrigin` / `MetricValue.isInterpretation`
 and `Interpretation.isObjectiveFact` make the distinction part of the type system,

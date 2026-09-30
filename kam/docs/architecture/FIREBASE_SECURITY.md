@@ -3,14 +3,26 @@
 How authorization is enforced for the Mutual Device Presence & Reassurance
 System, and how it is verified.
 
-Rules live in `firebase/firestore.rules`; the data they protect is described in
-`FIRESTORE_DATA_MODEL.md`. The rules are backed by 114 emulator tests in
-`firebase/test/firestore.rules.test.js`.
+Rules live in root `firestore.rules` (mirrored at `firebase/firestore.rules`);
+the data they protect is described in `FIRESTORE_DATA_MODEL.md`. Phase 19
+historically recorded 114 passing emulator tests; current emulator validation is
+BLOCKED and is not inferred from that historical count.
 
 > **Phase 19** hardened the rules and the client and produced the authoritative
 > threat model, enforcement matrix and test matrix in
 > [`../security/SECURITY_AND_AUTHORIZATION.md`](../security/SECURITY_AND_AUTHORIZATION.md).
 > This document remains the original Phase 3+ authorization narrative.
+
+> **Current configuration:** Firebase project identifiers are present in this
+> checkout, but the intended production project is unconfirmed. The rules tests
+> use the isolated local `demo-kam` emulator project. See the as-built
+> [Firebase architecture](FIREBASE_ARCHITECTURE.md) and
+> [final handover](../project/FINAL_PROJECT_HANDOVER.md).
+>
+> This document contains Phase 3-era examples and test groupings. For current
+> enforcement details, use
+> [`../security/SECURITY_AND_AUTHORIZATION.md`](../security/SECURITY_AND_AUTHORIZATION.md);
+> historical test counts here are not current validation.
 
 ---
 
@@ -32,8 +44,8 @@ Explicitly **out of scope**: account takeover, device malware, traffic analysis,
 and server-side rate limiting (Security Rules cannot throttle).
 
 There is no Cloud Functions project and there will not be one: the architecture
-is designed for Spark and no live project is configured, so every decision below
-is enforced by Security Rules rather than by trusted server code
+is designed for Spark, so every decision below is enforced by Security Rules
+rather than by trusted server code
 ([ADR-009](../decisions/ADR-009-spark-only-no-cloud-functions.md)).
 
 ---
@@ -203,7 +215,8 @@ rules even if the binary is modified.
 ## 8. How the rules are verified
 
 `firebase/test/firestore.rules.test.js` runs against the Firestore Emulator with
-the real rules loaded. 114 tests, all passing. The table below is the original
+the real rules loaded. Phase 19 reports 114 passing tests; this is historical,
+not a current test result. The table below is the original
 Phase 3 grouping; the authoritative, current scenario matrix is in
 [`../security/SECURITY_AND_AUTHORIZATION.md`](../security/SECURITY_AND_AUTHORIZATION.md) §18.
 
@@ -224,12 +237,13 @@ Run them with:
 
 ```bash
 cd kam
-firebase emulators:exec --only firestore "node --test firebase/test/firestore.rules.test.js"
+firebase emulators:exec --project demo-kam --only firestore "node --test firebase/test/firestore.rules.test.js"
 ```
 
-The emulator uses the `demo-kam` project id, which is the documented Firebase
-convention for a **local-only** project: it requires no account, no credentials
-and cannot touch production data.
+The test suite initializes contexts with `demo-kam`. Pass `--project demo-kam`
+explicitly so Firebase CLI does not inherit the current `.firebaserc` default
+`gendersocialapp`. Emulator test data is local; this does not validate deployment
+to a Firebase production project.
 
 ---
 

@@ -30,9 +30,10 @@ class AppConfig {
 
   /// Reads configuration from the compiler environment.
   ///
-  /// Sane development defaults are used so a developer can run the app with no
-  /// extra flags. Firebase stays disabled until its client identifiers are
-  /// provided, which is the honest default (no Firebase project is assumed).
+  /// Values supplied by `--dart-define` override the generated FlutterFire
+  /// options selected by the normal application entry point. This config object
+  /// alone does not load generated options; `AppBootstrap.run()` explicitly opts
+  /// into them. A caller initializing without either source remains offline.
   factory AppConfig.fromEnvironment() {
     const rawEnv = String.fromEnvironment(
       'APP_ENV',

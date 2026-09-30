@@ -1,6 +1,6 @@
 {
-    "name": "kam",
-    "short_name": "kam",
+    "name": "Know About Me",
+    "short_name": "Know About Me",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

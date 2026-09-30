@@ -1,120 +1,72 @@
-# Firebase configuration and rules tests
+# Firestore Rules Test Project
 
-Everything in this directory runs against the **Firebase Emulator Suite**. No real
-Firebase project, account or credential is required.
+This directory contains the Node test package and mirrored Rules/index files.
+The executable Rules tests use Firebase Emulator Suite with project ID
+`demo-kam`; they do not require a production account when run against the
+emulator. Always pass `--project demo-kam`: the repository `.firebaserc` default
+is `gendersocialapp` and must not be used accidentally for emulator testing.
 
-Authoritative documentation:
-
-- `../docs/architecture/FIREBASE_ARCHITECTURE.md` — services, environments, boundaries
-- `../docs/architecture/FIRESTORE_DATA_MODEL.md` — collections and ownership
-- `../docs/architecture/FIREBASE_SECURITY.md` — authorization model
-- `../docs/decisions/ADR-007-firebase-integration.md` — why it is wired this way
-
----
-
-## Files
+## Files and sources of truth
 
 | File | Purpose |
 | --- | --- |
-| `../firebase.json` | Firestore rules/indexes paths + emulator ports |
-| `../.firebaserc` | Project aliases (`default` is the local `demo-kam`) |
-| `firestore.rules` | Security rules (default-deny, pair-scoped) |
-| `firestore.indexes.json` | Composite indexes for the queries the product needs |
-| `package.json` | Node project for the rules tests |
-| `test/firestore.rules.test.js` | Firestore emulator tests for authorization, pairing, sharing, and profile/preferences rules |
+| `../firebase.json` | Firebase CLI Firestore Rules/index deployment targets (root files). |
+| `../.firebaserc` | CLI project default (`gendersocialapp`; production intent unverified). |
+| `firestore.rules` | Mirror of root `../firestore.rules`; tests load this copy. |
+| `firestore.indexes.json` | Mirror of root `../firestore.indexes.json`. |
+| `package.json` / `package-lock.json` | Node test dependencies and `npm test` script. |
+| `test/firestore.rules.test.js` | Emulator test setup with project ID `demo-kam`. |
 
----
+The root Rules and index files are the deployment paths configured in
+`firebase.json`. Mirror parity was checked during Phase 27/28. No production
+Rules or indexes deployment is claimed.
 
-## One-time setup
+## Prerequisites and test
 
-```bash
-cd kam
-npm --prefix firebase install        # installs @firebase/rules-unit-testing + firebase
-firebase --version                   # requires the Firebase CLI
-java -version                        # the Firestore emulator needs Java 11+
+Install Node.js/npm and Firebase CLI, then run from the Flutter package root:
+
+```powershell
+npm --prefix firebase ci
+firebase --version
+firebase emulators:exec --project demo-kam --only firestore "npm --prefix firebase test"
 ```
 
-No `firebase login` is needed: `demo-kam` is a `demo-` prefixed project id, which
-Firebase reserves for local emulator use.
+Test prerequisites include the Firebase Emulator Suite and a supported Java
+runtime. The current environment did not have Node/npm or Firebase CLI available,
+so current Rules test status is BLOCKED. Phase 19 historically reports 114/114
+passing scenarios; this is not a current result.
 
----
+## Run the app against local emulators
 
-## Run the rules tests
+Start both services:
 
-```bash
-cd kam
-firebase emulators:exec --only firestore "node --test firebase/test/firestore.rules.test.js"
+```powershell
+firebase emulators:start --project demo-kam --only firestore,auth
 ```
 
-Or, equivalently:
+Configure the Flutter app with complete dummy Firebase client options and
+`FIREBASE_USE_EMULATORS=true`. For Android Emulator the host is normally
+`10.0.2.2`; desktop uses `localhost`; physical devices use a reachable LAN IP.
+See [`../docs/architecture/FIREBASE_ARCHITECTURE.md`](../docs/architecture/FIREBASE_ARCHITECTURE.md)
+and [`../docs/project/DEVELOPER_SETUP.md`](../docs/project/DEVELOPER_SETUP.md).
 
-```bash
-cd kam
-firebase emulators:exec --only firestore "npm --prefix firebase test"
+The adapter uses Firestore port 8080 and Auth port 9099 (Firebase CLI defaults).
+This project has no Functions emulator and no FCM integration. Emulator UI is
+not configured by the repository.
+
+## Deploying Rules/indexes
+
+The repository's CLI default is `gendersocialapp`; its production intent is
+unconfirmed. Never run deployment based on that default. First inspect and test
+the root rules/indexes, confirm project ownership and environment in Firebase
+Console, authenticate with the intended operator account, and pass an explicit
+confirmed project ID:
+
+```powershell
+firebase deploy --only firestore:rules --project <confirmed-project-id>
+firebase deploy --only firestore:indexes --project <confirmed-project-id>
 ```
 
-`emulators:exec` starts the emulator, runs the command with the real rules loaded,
-then shuts everything down. A non-zero exit code means at least one rule allowed
-or denied something it should not.
-
----
-
-## Develop against the emulators
-
-```bash
-cd kam
-firebase emulators:start --only firestore,auth
-```
-
-Then run the Flutter app pointed at the emulators:
-
-```bash
-flutter run \
-  --dart-define=FIREBASE_PROJECT_ID=demo-kam \
-  --dart-define=FIREBASE_API_KEY=demo-api-key \
-  --dart-define=FIREBASE_APP_ID=1:000000000000:android:0000000000000000000000 \
-  --dart-define=FIREBASE_MESSAGING_SENDER_ID=000000000000 \
-  --dart-define=FIREBASE_USE_EMULATORS=true
-```
-
-Emulator UI: <http://localhost:4000>
-
-### Reset emulator data
-
-- Stop the process: emulator data is in-memory and is discarded.
-- Or wipe from a running session: `curl -X DELETE http://localhost:8080/emulator/v1/projects/demo-kam/databases/(default)/documents`
-- The tests already call `clearFirestore()` between cases.
-
-### Ports
-
-`8080` Firestore · `9099` Auth · `4000` UI. No Functions emulator is configured:
-the project uses the **Spark** plan and has no Cloud Functions source. See
-[`../docs/architecture/SPARK_ONLY_ARCHITECTURE.md`](../docs/architecture/SPARK_ONLY_ARCHITECTURE.md).)
-
-If a port is busy, change `firebase.json` **and** `FirebaseEmulatorPorts` in
-`../lib/core/firebase/firebase_emulators.dart` together.
-
-> **Cloud Messaging is not emulatable.** The Firebase Emulator Suite has no FCM
-> emulator, and no messaging SDK or push delivery is currently wired into the
-> app. A future notification implementation would need device-level verification.
-
----
-
-## Deploying against a real project
-
-These commands require an authenticated account and a real project, and were
-**not** run when this foundation was created.
-
-```bash
-cd kam
-firebase login
-firebase use --add                  # add your dev/prod project aliases
-firebase deploy --only firestore:rules
-firebase deploy --only firestore:indexes
-```
-
-Then supply that project's client identifiers to the Flutter build via
-`--dart-define` (see `../docs/architecture/FIREBASE_ARCHITECTURE.md` §3).
-
-**Never** commit a service-account key, an Admin credential, or an `.env` file
-containing secrets.
+These commands are instructions only and were not executed in Phases 26–28. Never
+commit service-account keys, Firebase Admin credentials, private keys, or
+environment secrets.

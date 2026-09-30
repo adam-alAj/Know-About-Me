@@ -39,10 +39,9 @@ final platformInfoProvider = Provider<PlatformInfo>(
 
 /// The device-local notification service.
 ///
-/// Defaults to the honest no-op implementation that reports itself
-/// unsupported. A real platform binding is a notification-phase task; until
-/// then the app must never claim it delivered an alert it did not
-/// (see `docs/architecture/SPARK_ONLY_ARCHITECTURE.md` §4).
+/// Uses the Android MethodChannel notification bridge. Unsupported targets
+/// return an explicit unsupported failure; OS delivery remains best effort and
+/// is not claimed merely because a rule matched.
 final localNotificationServiceProvider = Provider<LocalNotificationService>(
   (ref) => const MethodChannelLocalNotificationService(),
 );
