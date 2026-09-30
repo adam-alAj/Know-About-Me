@@ -54,7 +54,9 @@ final localNotificationServiceProvider = Provider<LocalNotificationService>(
 /// feature stores that wrote them. See `LocalStorageKeys` for exactly what is
 /// removed — and what is deliberately kept (NFR-004).
 final sensitiveLocalDataProvider = Provider<SensitiveLocalData>(
-  (ref) => const SharedPreferencesSensitiveLocalData(),
+  (ref) => SharedPreferencesSensitiveLocalData(
+    logger: ref.watch(loggerProvider),
+  ),
 );
 
 /// The application logger.
@@ -65,5 +67,8 @@ final loggerProvider = Provider<AppLogger>((ref) {
   final config = ref.watch(appConfigProvider);
   return config.enableVerboseLogging
       ? const DeveloperAppLogger()
-      : const DeveloperAppLogger(minimumLevel: LogLevel.info);
+      : const DeveloperAppLogger(
+          minimumLevel: LogLevel.warning,
+          includeErrorDetails: false,
+        );
 });

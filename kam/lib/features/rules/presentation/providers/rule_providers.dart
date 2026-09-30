@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/providers.dart';
 import '../../../../core/error/app_failure.dart';
+import '../../../../core/firebase/firebase_error_mapper.dart';
 import '../../../../core/firebase/firebase_providers.dart';
 import '../../../../core/logging/app_logger.dart';
 import '../../../../core/result/result.dart';
@@ -209,7 +210,7 @@ class RulesController extends AsyncNotifier<List<Rule>> {
   }
 
   AppFailure _log(String operation, Object error, StackTrace stackTrace) {
-    final failure = AppFailure.fromException(error, stackTrace);
+    final failure = FirebaseErrorMapper.toFailure(error, stackTrace);
     ref
         .read(loggerProvider)
         .warning(

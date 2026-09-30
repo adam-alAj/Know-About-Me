@@ -56,6 +56,18 @@ abstract final class FirebaseBootstrap {
       return false;
     }
 
+    if (config.hasMisconfiguredEmulatorRequest) {
+      _lastFailure = const ConfigurationFailure(
+        'This app build has an invalid Firebase emulator configuration.',
+      );
+      logger.error(
+        'Firebase emulator configuration is invalid for this build.',
+        context: {'environment': config.environment.name},
+      );
+      _initialized = false;
+      return false;
+    }
+
     if (!config.hasFirebaseConfiguration && !useGeneratedOptions) {
       logger.info(
         'Firebase is not configured for this build; continuing offline.',

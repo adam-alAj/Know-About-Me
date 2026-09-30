@@ -29,15 +29,10 @@ class FirestoreHistoryRepository {
       ..remove('deviceId')
       ..['recordedAt'] = FieldValue.serverTimestamp();
     if (event.observedAt != null) data['observedAt'] = Timestamp.fromDate(event.observedAt!.toUtc());
-    try {
-      // Rules permit creation but reject updates, so retries with this stable
-      // document ID cannot overwrite the original event.
-      await reference.set(data);
-    } on FirebaseException catch (error) {
-      // An existing document is denied as an update. Keep the cached event;
-      // the create-only rule is the final deduplication boundary.
-      if (error.code != 'permission-denied') rethrow;
-    }
+    // Rules permit creation but reject updates, so retries with this stable
+    // document ID cannot overwrite the original event. Propagate denials:
+    // permission-denied can also mean authorization changed, not only duplicate.
+    await reference.set(data);
   }
 
   Stream<List<DeviceEvent>> watch({required String pairId, EventCategory? category, int limit = 50}) {

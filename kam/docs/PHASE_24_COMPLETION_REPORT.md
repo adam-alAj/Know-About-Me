@@ -95,7 +95,6 @@ Latency, CPU, frame times, memory, battery, network bytes, Firestore operations,
 - `flutter pub get`: stalled without output; stopped.
 - `flutter analyze`: no current successful run; blocked in this environment.
 - `flutter test`: latest supplied pre-fix full run was 662 passed, 1 timed-out privacy test (663 total); no current full run completed.
-- lutter test attempt during Phase 24: no output for about 10 seconds; stopped. No current full run completed.
 - `firebase emulators:exec --only firestore "npm --prefix firebase test"`: failed because Firebase CLI is unavailable; npm is also not on PATH.
 - `flutter build apk --debug`: stalled without output; stopped.
 - `git diff --check`: PASS; line-ending conversion warnings only.
@@ -131,5 +130,3 @@ Flutter CLI commands stall; Firebase CLI/npm and a working Android device/emulat
 - [ ] Android and two-user lifecycle/offline/permission scenarios pass (device/accounts unavailable).
 
 PHASE 24 STATUS: BLOCKED
-
-

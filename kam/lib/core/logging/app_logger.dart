@@ -35,6 +35,12 @@ abstract interface class AppLogger {
     'latitude',
     'longitude',
     'location',
+    'uid',
+    'userid',
+    'pairid',
+    'deviceid',
+    'documentpath',
+    'path',
   };
 
   /// Emits one log entry.
@@ -110,6 +116,7 @@ class DeveloperAppLogger implements AppLogger {
   const DeveloperAppLogger({
     this.name = 'kam',
     this.minimumLevel = LogLevel.debug,
+    this.includeErrorDetails = true,
   });
 
   /// Logger name shown in DevTools.
@@ -117,6 +124,11 @@ class DeveloperAppLogger implements AppLogger {
 
   /// Entries below this level are dropped.
   final LogLevel minimumLevel;
+
+  /// Whether raw exception messages and stack traces may be written.
+  /// Disable in release builds because SDK/plugin errors can contain
+  /// identifiers or document details even when caller context is clean.
+  final bool includeErrorDetails;
 
   @override
   void log(
@@ -139,8 +151,10 @@ class DeveloperAppLogger implements AppLogger {
       buffer.toString(),
       name: name,
       level: level.severity,
-      error: error,
-      stackTrace: stackTrace,
+      error: includeErrorDetails
+          ? error
+          : error?.runtimeType,
+      stackTrace: includeErrorDetails ? stackTrace : null,
       time: DateTime.now().toUtc(),
     );
   }
@@ -152,10 +166,19 @@ class DeveloperAppLogger implements AppLogger {
     if (context == null) return null;
     return {
       for (final entry in context.entries)
-        entry.key: AppLogger.sensitiveKeys.contains(entry.key.toLowerCase())
+        entry.key: AppLogger.sensitiveKeys.contains(
+              entry.key.toLowerCase().replaceAll(RegExp('[^a-z0-9]'), ''),
+            )
             ? '***'
-            : entry.value,
+            : _safeContextValue(entry.value),
     };
+  }
+
+  static Object? _safeContextValue(Object? value) {
+    // Structured records can contain arbitrary profile/device fields. Callers
+    // should log selected scalar facts, never a complete document or collection.
+    if (value is Map || value is Iterable) return '[omitted]';
+    return value;
   }
 }
 

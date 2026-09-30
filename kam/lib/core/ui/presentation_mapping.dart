@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../error/app_failure.dart';
+import '../firebase/firebase_error_mapper.dart';
 import '../result/result.dart';
 import 'data_presentation_state.dart';
 
@@ -55,7 +56,10 @@ abstract final class PresentationMapping {
 
   static DataPresentation _fromErrorOrLoading(AsyncValue<Object?> value) {
     if (value.hasError) {
-      final failure = AppFailure.fromException(value.error!, value.stackTrace);
+      final failure = FirebaseErrorMapper.toFailure(
+        value.error!,
+        value.stackTrace,
+      );
       return DataPresentation.failure(failure.message);
     }
     return const DataPresentation.loading();

@@ -1,5 +1,8 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../error/app_failure.dart';
+import '../logging/app_logger.dart';
+
 /// The `shared_preferences` keys this application uses for **sensitive local
 /// state**.
 ///
@@ -65,7 +68,11 @@ abstract interface class SensitiveLocalData {
 
 /// `shared_preferences`-backed implementation.
 class SharedPreferencesSensitiveLocalData implements SensitiveLocalData {
-  const SharedPreferencesSensitiveLocalData();
+  const SharedPreferencesSensitiveLocalData({
+    this.logger = const NoopAppLogger(),
+  });
+
+  final AppLogger logger;
 
   @override
   Future<void> clear() async {
@@ -74,10 +81,19 @@ class SharedPreferencesSensitiveLocalData implements SensitiveLocalData {
       for (final key in LocalStorageKeys.clearedOnSignOut) {
         await preferences.remove(key);
       }
-    } catch (_) {
+    } catch (error, stackTrace) {
       // Best effort by contract: the session is ending either way, and the
       // production implementation only fails when platform storage is missing
       // (for example in a unit-test host).
+      final failure = LocalStorageFailure(
+        'Protected local data could not be fully cleared.',
+        cause: error,
+        stackTrace: stackTrace,
+      );
+      logger.warning(
+        'Sensitive local session data could not be fully cleared',
+        context: {'failureType': failure.type.name},
+      );
     }
   }
 }

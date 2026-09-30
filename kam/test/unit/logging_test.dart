@@ -11,12 +11,20 @@ void main() {
         'Token': 'abc123',
         'email': 'someone@example.com',
         'latitude': 24.7,
+        'pairId': 'pair-identifier',
+        'deviceId': 'device-identifier',
+        'document_path': 'pairs/private-path',
+        'record': {'latitude': 12.3, 'label': 'home'},
         'environment': 'development',
       });
 
       expect(sanitized!['Token'], '***');
       expect(sanitized['email'], '***');
       expect(sanitized['latitude'], '***');
+      expect(sanitized['pairId'], '***');
+      expect(sanitized['deviceId'], '***');
+      expect(sanitized['document_path'], '***');
+      expect(sanitized['record'], '[omitted]');
       // Non-sensitive context is preserved for diagnostics.
       expect(sanitized['environment'], 'development');
     });

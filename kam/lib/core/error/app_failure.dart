@@ -21,6 +21,12 @@ enum FailureType {
   /// The user is not authenticated or not authorized.
   authentication,
 
+  /// The server rejected access under the current authorization state.
+  authorization,
+
+  /// A local persistence operation could not be completed.
+  localStorage,
+
   /// The platform cannot provide the requested capability (FR-068).
   unsupportedCapability,
 
@@ -135,6 +141,21 @@ class PermissionFailure extends AppFailure {
 class AuthenticationFailure extends AppFailure {
   const AuthenticationFailure(super.message, {super.cause, super.stackTrace})
     : super(type: FailureType.authentication);
+}
+
+/// The current server-side authorization no longer permits the action.
+///
+/// Kept distinct from [PermissionFailure], which represents an OS/runtime
+/// permission such as location or notifications.
+class AuthorizationFailure extends AppFailure {
+  const AuthorizationFailure(super.message, {super.cause, super.stackTrace})
+    : super(type: FailureType.authorization);
+}
+
+/// A local persistence operation failed. The caller may still have remote data.
+class LocalStorageFailure extends AppFailure {
+  const LocalStorageFailure(super.message, {super.cause, super.stackTrace})
+    : super(type: FailureType.localStorage);
 }
 
 /// The current platform cannot provide the requested capability (FR-068).

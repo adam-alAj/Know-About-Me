@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/providers.dart';
 import '../../../../core/error/app_failure.dart';
+import '../../../../core/firebase/firebase_error_mapper.dart';
 import '../../../../core/logging/app_logger.dart';
 import '../../../../core/result/result.dart';
 import '../../domain/models/auth_identity.dart';
@@ -181,7 +182,7 @@ class AuthController extends Notifier<AuthState> {
   void _onStreamError(Object error, StackTrace stackTrace) {
     // "Unknown" is not "signed out": presenting a sign-in form here would hide a
     // real outage and could silently discard a live session (SRS Task 21).
-    final failure = AppFailure.fromException(error, stackTrace);
+    final failure = FirebaseErrorMapper.toFailure(error, stackTrace);
     ref
         .read(loggerProvider)
         .error(

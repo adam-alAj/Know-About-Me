@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../core/logging/app_logger.dart';
+
 /// Application-wide fallback for unexpected build errors.
 ///
 /// Replaces Flutter's default error widget so a broken subtree shows a calm,
@@ -9,9 +11,27 @@ import 'package:flutter/material.dart';
 /// information they need; nothing sensitive is ever rendered.
 abstract final class AppErrorBoundary {
   /// Installs the boundary. Called once during bootstrap.
-  static void install() {
+  static void install({required AppLogger logger}) {
     ErrorWidget.builder = (FlutterErrorDetails details) =>
         AppErrorFallbackScreen(details: details);
+
+    FlutterError.onError = (details) {
+      logger.error(
+        'Unhandled Flutter framework error',
+        error: details.exception,
+        stackTrace: details.stack,
+        context: {'errorType': details.exception.runtimeType.toString()},
+      );
+    };
+    PlatformDispatcher.instance.onError = (error, stackTrace) {
+      logger.error(
+        'Unhandled asynchronous application error',
+        error: error,
+        stackTrace: stackTrace,
+        context: {'errorType': error.runtimeType.toString()},
+      );
+      return true;
+    };
   }
 }
 

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/providers.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/error/app_failure.dart';
+import '../../../core/firebase/firebase_error_mapper.dart';
 import '../../../core/notifications/local_notification_service.dart';
 import '../../../core/ui/data_state_view.dart';
 import '../../../core/ui/presentation_mapping.dart';
@@ -317,7 +318,7 @@ class _NotificationPreferenceSection extends ConsumerWidget {
 
     // A thrown stream error and a classified failure both become a safe message.
     final AppFailure? failure = preferencesAsync.hasError
-        ? AppFailure.fromException(
+        ? FirebaseErrorMapper.toFailure(
             preferencesAsync.error!,
             preferencesAsync.stackTrace,
           )

@@ -1,7 +1,8 @@
 /// Deployment environments the application can run against.
 ///
 /// The active environment is selected at build time via `--dart-define=APP_ENV=...`
-/// and defaults to [AppEnvironment.development] (SRS NFR-029, Task 8).
+/// and defaults to development in debug/profile tooling and production in a
+/// release build (SRS NFR-029, Task 8).
 enum AppEnvironment {
   development,
   staging,

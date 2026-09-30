@@ -28,12 +28,13 @@ abstract final class AppBootstrap {
   /// Does **not** start any widget tree.
   static Future<AppConfig> initialize({
     bool useGeneratedFirebaseOptions = false,
-    AppLogger logger = const DeveloperAppLogger(),
+    AppLogger? logger,
   }) async {
     WidgetsFlutterBinding.ensureInitialized();
 
     final config = AppConfig.fromEnvironment();
-    logger.info(
+    final activeLogger = logger ?? _loggerFor(config);
+    activeLogger.info(
       'Application starting',
       context: {'environment': config.environment.name},
     );
@@ -42,16 +43,16 @@ abstract final class AppBootstrap {
     final firebaseReady = await FirebaseBootstrap.initialize(
       config,
       useGeneratedOptions: useGeneratedFirebaseOptions,
-      logger: logger,
+      logger: activeLogger,
     );
     if (!firebaseReady) {
       final failure = FirebaseBootstrap.lastFailure;
       if (failure != null) {
         // Initialization was attempted and failed: report it, but keep going so
         // the app degrades instead of refusing to start (NFR-014, NFR-015).
-        logger.warning('Continuing without Firebase: ${failure.message}');
+        activeLogger.warning('Continuing without Firebase: ${failure.message}');
       } else {
-        logger.info(
+        activeLogger.info(
           'Firebase is not configured for this build; continuing offline.',
         );
       }
@@ -65,16 +66,66 @@ abstract final class AppBootstrap {
 
   /// Initializes the application and runs the root widget.
   static Future<void> run() async {
-    final config = await initialize(useGeneratedFirebaseOptions: true);
+    WidgetsFlutterBinding.ensureInitialized();
+    final config = AppConfig.fromEnvironment();
+    final logger = _loggerFor(config);
+    if (!kIsWeb) AppErrorBoundary.install(logger: logger);
 
-    // Compose-time guard: show a calm fallback if a widget fails to build.
-    if (!kIsWeb) AppErrorBoundary.install();
-
-    runApp(
-      ProviderScope(
-        overrides: [appConfigProvider.overrideWithValue(config)],
-        child: KamApp(config: config),
-      ),
-    );
+    try {
+      await initialize(
+        useGeneratedFirebaseOptions: true,
+        logger: logger,
+      );
+      runApp(
+        ProviderScope(
+          overrides: [appConfigProvider.overrideWithValue(config)],
+          child: KamApp(config: config),
+        ),
+      );
+    } catch (error, stackTrace) {
+      logger.error(
+        'Application startup failed',
+        error: error,
+        stackTrace: stackTrace,
+        context: {'errorType': error.runtimeType.toString()},
+      );
+      runApp(const _StartupFailureApp());
+    }
   }
+
+  static AppLogger _loggerFor(AppConfig config) => config.enableVerboseLogging
+      ? const DeveloperAppLogger()
+      : const DeveloperAppLogger(
+          minimumLevel: LogLevel.warning,
+          includeErrorDetails: false,
+        );
+}
+
+class _StartupFailureApp extends StatelessWidget {
+  const _StartupFailureApp();
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    home: Scaffold(
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'The app could not finish starting. Your account data has not been changed. Try again, or close and reopen the app.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: AppBootstrap.run,
+                child: const Text('Try again'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }

@@ -55,6 +55,20 @@ void main() {
       expect(complete.hasMisconfiguredEmulatorRequest, isFalse);
     });
 
+    test('production cannot be configured to use Firebase emulators', () {
+      const productionEmulators = AppConfig(
+        environment: AppEnvironment.production,
+        enableVerboseLogging: false,
+        useFirebaseEmulators: true,
+        firebaseProjectId: 'prod-project',
+        firebaseApiKey: 'client-api-key',
+        firebaseAppId: 'app-id',
+        firebaseMessagingSenderId: 'sender-id',
+      );
+
+      expect(productionEmulators.hasMisconfiguredEmulatorRequest, isTrue);
+    });
+
     test('toString never exposes anything beyond the project id', () {
       expect(complete.toString(), contains('demo-kam'));
       expect(complete.toString(), isNot(contains('client-safe-api-key')));

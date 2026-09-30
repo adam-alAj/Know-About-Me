@@ -36,8 +36,8 @@ abstract final class FirebaseErrorMapper {
 
     switch (error.code) {
       case 'permission-denied':
-        return PermissionFailure(
-          'You do not have access to this information.',
+        return AuthorizationFailure(
+          'This action is no longer authorized. Your connection or sharing permissions may have changed.',
           cause: detail,
           stackTrace: stackTrace,
         );

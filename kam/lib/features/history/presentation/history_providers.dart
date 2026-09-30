@@ -2,8 +2,12 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/firebase/firebase_providers.dart';
 import '../../../app/providers.dart';
+import '../../../core/error/app_failure.dart';
+import '../../../core/firebase/firebase_error_mapper.dart';
+import '../../../core/firebase/firebase_providers.dart';
+import '../../../core/logging/app_logger.dart';
+import '../../../core/result/result.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
 import '../../pairing/presentation/providers/pairing_providers.dart';
 import '../../device_state/domain/models/state_observation.dart';
@@ -30,10 +34,13 @@ final firestoreHistoryRepositoryProvider = Provider<FirestoreHistoryRepository?>
 
 /// Writes locally first. Firestore's offline queue handles transient network
 /// loss; authorization failures leave the bounded local copy intact.
-final historyRecorderProvider = Provider<HistoryRecorder>((ref) => HistoryRecorder(
-  local: ref.watch(localHistoryRepositoryProvider),
-  remote: ref.watch(firestoreHistoryRepositoryProvider),
-));
+final historyRecorderProvider = Provider<HistoryRecorder>(
+  (ref) => HistoryRecorder(
+    local: ref.watch(localHistoryRepositoryProvider),
+    remote: ref.watch(firestoreHistoryRepositoryProvider),
+    logger: ref.watch(loggerProvider),
+  ),
+);
 
 /// One app-root listener set records only real charging/connectivity changes
 /// and rule outcome transitions. It is pair-aware, sharing-aware and disposed
@@ -148,35 +155,75 @@ DeviceEvent _event(String pairId, String uid, String deviceId, DeviceEventType t
 }
 
 class HistoryRecorder {
-  HistoryRecorder({required this.local, required this.remote});
+  HistoryRecorder({
+    required this.local,
+    required this.remote,
+    required this.logger,
+  });
   final HistoryRepository local;
   final FirestoreHistoryRepository? remote;
+  final AppLogger logger;
 
   Future<void> record(DeviceEvent event) async {
     try {
       await local.add(event);
-    } on Object {
+    } on Object catch (error, stackTrace) {
       // Event recording is best-effort and must not interrupt device or rule UI.
+      _logFailure('saveLocalEvent', error, stackTrace);
     }
     try {
       await remote?.add(event);
-    } on Object {
+    } on Object catch (error, stackTrace) {
       // Local history remains available; Firestore errors are not fatal to UI.
+      _logFailure('saveRemoteEvent', error, stackTrace, firebase: true);
     }
   }
 
-  Future<void> clear({required String pairId, required String ownerUserId}) async {
+  Future<Result<void>> clear({
+    required String pairId,
+    required String ownerUserId,
+  }) async {
+    AppFailure? failure;
     try {
       await local.clearLocal();
-    } on Object {
+    } on Object catch (error, stackTrace) {
       // A local storage failure should not prevent attempting remote deletion.
+      failure = LocalStorageFailure(
+        'Saved history could not be cleared from this device.',
+        cause: error,
+        stackTrace: stackTrace,
+      );
+      _logFailure('clearLocalHistory', error, stackTrace);
     }
     try {
-      await remote?.deleteOwnedHistory(pairId: pairId, ownerUserId: ownerUserId);
-    } on Object {
-      // The local copy has already been cleared. Surface remote failures through
-      // a later reload rather than failing the screen's deletion action.
+      await remote?.deleteOwnedHistory(
+        pairId: pairId,
+        ownerUserId: ownerUserId,
+      );
+    } on Object catch (error, stackTrace) {
+      failure ??= FirebaseErrorMapper.toFailure(error, stackTrace);
+      _logFailure('clearRemoteHistory', error, stackTrace, firebase: true);
     }
+    return failure == null ? const Success<void>(null) : Failure<void>(failure);
+  }
+
+  void _logFailure(
+    String operation,
+    Object error,
+    StackTrace stackTrace, {
+    bool firebase = false,
+  }) {
+    final failure = firebase
+        ? FirebaseErrorMapper.toFailure(error, stackTrace)
+        : LocalStorageFailure(
+            'Local history storage is temporarily unavailable.',
+            cause: error,
+            stackTrace: stackTrace,
+          );
+    logger.warning(
+      'History operation failed',
+      context: {'operation': operation, 'failureType': failure.type.name},
+    );
   }
 }
 

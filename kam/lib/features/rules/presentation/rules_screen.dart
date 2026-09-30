@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../app/router/app_routes.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/error/app_failure.dart';
+import '../../../core/firebase/firebase_error_mapper.dart';
 import '../../../core/ui/widgets/app_button.dart';
 import '../../../core/ui/widgets/app_scaffold.dart';
 import '../../../core/ui/widgets/empty_view.dart';
@@ -53,7 +54,7 @@ class _RulesBody extends ConsumerWidget {
       return const LoadingView(label: 'Checking your connection');
     }
     if (scopeAsync.hasError) {
-      final failure = AppFailure.fromException(
+      final failure = FirebaseErrorMapper.toFailure(
         scopeAsync.error!,
         scopeAsync.stackTrace,
       );
@@ -77,7 +78,7 @@ class _RulesBody extends ConsumerWidget {
     final rulesAsync = ref.watch(rulesControllerProvider);
     if (!rulesAsync.hasValue) {
       if (rulesAsync.hasError) {
-        final failure = AppFailure.fromException(
+        final failure = FirebaseErrorMapper.toFailure(
           rulesAsync.error!,
           rulesAsync.stackTrace,
         );

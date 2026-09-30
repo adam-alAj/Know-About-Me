@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/providers.dart';
 import '../../../core/constants/app_spacing.dart';
+import '../../../core/error/app_failure.dart';
+import '../../../core/firebase/firebase_error_mapper.dart';
+import '../../../core/logging/app_logger.dart';
 import '../../../core/ui/widgets/app_card.dart';
 import '../../../core/ui/widgets/app_scaffold.dart';
 import '../../../core/ui/widgets/empty_view.dart';
+import '../../../core/ui/widgets/error_view.dart';
 import '../../../core/ui/widgets/loading_view.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
 import '../../pairing/presentation/providers/pairing_providers.dart';
@@ -30,7 +35,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         IconButton(
           tooltip: 'Clear history',
           icon: const Icon(Icons.delete_outline),
-          onPressed: () => _confirmClear(context),
+          onPressed: _confirmClear,
         ),
       ],
       body: Column(
@@ -44,10 +49,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           const SizedBox(height: AppSpacing.md),
           Expanded(child: history.when(
             loading: () => const LoadingView(label: 'Loading history'),
-            error: (_, _) => const EmptyView(
-              icon: Icons.history_outlined,
+            error: (error, stackTrace) => ErrorView(
               title: 'History is unavailable',
-              message: 'Your saved history could not be loaded right now.',
+              message: FirebaseErrorMapper.toFailure(error, stackTrace).message,
+              onRetry: () => ref.invalidate(historyEventsProvider(_category)),
             ),
             data: (events) => events.isEmpty
                 ? const EmptyView(
@@ -72,7 +77,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     onSelected: (_) => setState(() => _category = category),
   );
 
-  Future<void> _confirmClear(BuildContext context) async {
+  Future<void> _confirmClear() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -87,12 +92,39 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     if (confirmed != true || !mounted) return;
     final scope = ref.read(partnerScopeProvider).value;
     final uid = ref.read(currentIdentityProvider)?.uid;
+    AppFailure? failure;
     if (scope != null && uid != null) {
-      await ref.read(historyRecorderProvider).clear(pairId: scope.pairId, ownerUserId: uid);
+      final result = await ref
+          .read(historyRecorderProvider)
+          .clear(pairId: scope.pairId, ownerUserId: uid);
+      failure = result.failureOrNull;
     } else {
-      await ref.read(localHistoryRepositoryProvider).clearLocal();
+      try {
+        await ref.read(localHistoryRepositoryProvider).clearLocal();
+      } on Object catch (error, stackTrace) {
+        failure = LocalStorageFailure(
+          'Saved history could not be cleared from this device.',
+          cause: error,
+          stackTrace: stackTrace,
+        );
+        if (mounted) {
+          ref.read(loggerProvider).warning(
+            'History operation failed',
+            context: {
+              'operation': 'clearLocalHistory',
+              'failureType': FailureType.localStorage.name,
+            },
+          );
+        }
+      }
     }
+    if (!mounted) return;
     ref.invalidate(historyEventsProvider(_category));
+    if (failure != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(failure.message)),
+      );
+    }
   }
 }
 

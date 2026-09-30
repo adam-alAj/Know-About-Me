@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import 'app_environment.dart';
 
 /// Compile-time application configuration.
@@ -34,7 +36,7 @@ class AppConfig {
   factory AppConfig.fromEnvironment() {
     const rawEnv = String.fromEnvironment(
       'APP_ENV',
-      defaultValue: 'development',
+      defaultValue: kReleaseMode ? 'production' : 'development',
     );
     const verbose = bool.fromEnvironment('ENABLE_VERBOSE_LOGGING');
 
@@ -42,7 +44,10 @@ class AppConfig {
 
     return AppConfig(
       environment: environment,
-      enableVerboseLogging: verbose || environment.allowsVerboseLogging,
+      // Release builds never opt into verbose logs, even if a build flag or an
+      // accidental APP_ENV value requests development diagnostics.
+      enableVerboseLogging: !kReleaseMode &&
+          (verbose || environment.allowsVerboseLogging),
       firebaseProjectId: _optional('FIREBASE_PROJECT_ID'),
       firebaseApiKey: _optional('FIREBASE_API_KEY'),
       firebaseAppId: _optional('FIREBASE_APP_ID'),
@@ -119,9 +124,12 @@ class AppConfig {
           firebaseAppId != null ||
           firebaseMessagingSenderId != null);
 
-  /// Whether emulators were requested but Firebase itself is not configured.
+  /// Whether emulators were requested without a complete non-production setup.
   bool get hasMisconfiguredEmulatorRequest =>
-      useFirebaseEmulators && !hasFirebaseConfiguration;
+      useFirebaseEmulators &&
+      (!hasFirebaseConfiguration ||
+          environment == AppEnvironment.production ||
+          kReleaseMode);
 
   @override
   String toString() =>

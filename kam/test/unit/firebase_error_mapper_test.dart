@@ -17,13 +17,14 @@ void main() {
       FirebaseAuthException(code: code, message: message);
 
   group('Firestore codes map to classified failures', () {
-    test('permission-denied becomes a permission failure', () {
+    test('permission-denied becomes an authorization failure', () {
       final failure = FirebaseErrorMapper.toFailure(
         firestore('permission-denied', 'Missing or insufficient permissions.'),
       );
 
-      expect(failure, isA<PermissionFailure>());
-      expect(failure.type, FailureType.permission);
+      expect(failure, isA<AuthorizationFailure>());
+      expect(failure.type, FailureType.authorization);
+      expect(failure.message, contains('no longer authorized'));
     });
 
     test('unauthenticated becomes an authentication failure', () {
