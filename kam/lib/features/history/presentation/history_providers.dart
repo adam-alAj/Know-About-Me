@@ -180,7 +180,9 @@ class HistoryRecorder {
   }
 }
 
-final historyEventsProvider = StreamProvider.family<List<DeviceEvent>, EventCategory?>((ref, category) {
+// Each category owns a separate remote query. Dispose its Firestore listener
+// when the history view (and any other consumer) stops watching that category.
+final historyEventsProvider = StreamProvider.autoDispose.family<List<DeviceEvent>, EventCategory?>((ref, category) {
   final uid = ref.watch(currentIdentityProvider)?.uid;
   final scope = ref.watch(partnerScopeProvider).value;
   final remote = ref.watch(firestoreHistoryRepositoryProvider);
