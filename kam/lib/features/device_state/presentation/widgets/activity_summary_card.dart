@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/providers.dart';
-import '../../../../core/constants/app_spacing.dart';
 import '../../../../core/freshness/data_freshness.dart';
+import '../../../../core/ui/widgets/section_card.dart';
+import '../../../../core/ui/widgets/skeleton.dart';
 import '../../domain/models/activity_state.dart';
 import '../../domain/models/state_observation.dart';
 import '../providers/device_state_providers.dart';
@@ -24,25 +25,40 @@ class ActivitySummaryCard extends ConsumerWidget {
     final now = ref.watch(clockProvider).nowUtc();
     final activityAsync = ref.watch(currentLocalActivityStateProvider);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('Screen and activity'),
-        const SizedBox(height: AppSpacing.xs),
-        activityAsync.when(
-          data: (state) => Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Screen: ${_screenLabel(state.screenState)}'),
-              Text('Activity: ${_statusLabel(state.activityStatus)}'),
-              Text(
-                'Last observed activity: '
-                '${_lastActivityLabel(state.lastObservedActivityAt, now)}',
-              ),
-            ],
-          ),
-          loading: () => const Text('Reading activity state…'),
-          error: (_, _) => const Text('Activity unavailable'),
+    if (activityAsync.hasError) {
+      return const SectionCard(
+        title: 'Screen and activity',
+        icon: Icons.phone_android_outlined,
+        rows: [
+          StateRow(label: 'Status', value: 'Temporarily unavailable'),
+        ],
+      );
+    }
+    final state = activityAsync.value;
+    if (state == null) {
+      return const SectionSkeleton(
+        title: 'Screen and activity',
+        icon: Icons.phone_android_outlined,
+        rows: 3,
+      );
+    }
+
+    return SectionCard(
+      title: 'Screen and activity',
+      icon: Icons.phone_android_outlined,
+      rows: [
+        StateRow(
+          label: 'Screen',
+          value: _screenLabel(state.screenState),
+          emphasis: StateRowEmphasis.strong,
+        ),
+        StateRow(
+          label: 'Activity',
+          value: _statusLabel(state.activityStatus),
+        ),
+        StateRow(
+          label: 'Last observed activity',
+          value: _lastActivityLabel(state.lastObservedActivityAt, now),
         ),
       ],
     );

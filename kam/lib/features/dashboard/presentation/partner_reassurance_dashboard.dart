@@ -13,7 +13,11 @@ import '../../../core/ui/widgets/app_button.dart';
 import '../../../core/ui/widgets/app_card.dart';
 import '../../../core/ui/widgets/app_inline_message.dart';
 import '../../../core/ui/widgets/app_scaffold.dart';
+import '../../../core/ui/widgets/freshness_indicator.dart';
+import '../../../core/ui/widgets/section_card.dart';
 import '../../../core/ui/widgets/section_header.dart';
+import '../../../core/ui/widgets/skeleton.dart';
+import '../../../core/ui/widgets/status_pill.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
 import '../../device_state/domain/models/battery_state.dart';
 import '../../device_state/domain/models/network_state.dart';
@@ -21,8 +25,8 @@ import '../../device_state/domain/models/pair_sharing_state.dart';
 import '../../device_state/domain/models/remote_device_state.dart';
 import '../../device_state/domain/models/state_observation.dart';
 import '../../device_state/presentation/providers/connection_providers.dart';
-import '../../device_state/presentation/providers/sync_providers.dart';
 import '../../device_state/presentation/providers/device_state_providers.dart';
+import '../../device_state/presentation/providers/sync_providers.dart';
 import '../../device_state/presentation/widgets/activity_summary_card.dart';
 import '../../device_state/presentation/widgets/location_summary_card.dart';
 import '../../device_state/presentation/widgets/partner_location_actions.dart';
@@ -33,7 +37,15 @@ import '../../privacy/domain/models/sharing_category.dart';
 import '../../rules/presentation/widgets/rule_interpretations_section.dart';
 
 /// Partner-first dashboard over the authorized Phase 11 state stream.
-/// It contains no Firestore reads and never infers human behavior.
+///
+/// Structure answers, in order: who is being viewed, whether their device is
+/// currently reachable, when the data was last updated, the shared state itself,
+/// and what the user can do next. It contains no Firestore reads and never
+/// infers human behaviour.
+///
+/// Realtime behaviour: the previous value is kept on screen while a refresh is in
+/// flight, so a change updates the affected values in place rather than flashing
+/// the whole screen back to a loader (Phase 20 §21).
 class PartnerReassuranceDashboard extends ConsumerStatefulWidget {
   const PartnerReassuranceDashboard({super.key});
 
@@ -51,6 +63,8 @@ class _PartnerReassuranceDashboardState
   void initState() {
     super.initState();
     _now = ref.read(clockProvider).nowUtc();
+    // Ages ("Updated 4 min ago") must keep counting without a data change, so a
+    // single minute tick re-renders. It never reads or writes remote state.
     _displayTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() => _now = ref.read(clockProvider).nowUtc());
     });
@@ -108,7 +122,7 @@ class _PartnerReassuranceDashboardState
           children: [
             const _IncompleteProfileNotice(),
             if (memberships.isLoading || scopeAsync.isLoading)
-              const _LoadingPanel()
+              const _PartnerSkeleton()
             else if (memberships.hasError || scopeAsync.hasError)
               _ErrorPanel(
                 onRetry: () => ref.invalidate(pairMembershipsProvider),
@@ -120,14 +134,10 @@ class _PartnerReassuranceDashboardState
                 name: titleName ?? 'Your partner',
                 state: partnerState.value?.state,
                 now: now,
-                isFromCache: partnerState.value?.state.isFromCache ?? false,
-                connectionFromCache: membership?.isFromCache ?? false,
               ),
-              const SizedBox(height: AppSpacing.md),
-              if (partnerSharing.isLoading)
-                const AppCard(
-                  child: Text('Checking your partner’s sharing settings…'),
-                )
+              const SizedBox(height: AppSpacing.lg),
+              if (partnerSharing.isLoading && !partnerState.hasValue)
+                const _PartnerSkeleton()
               else if (partnerSharing.hasError)
                 const AppInlineMessage(
                   title: 'Sharing status unavailable',
@@ -142,26 +152,18 @@ class _PartnerReassuranceDashboardState
                   now: now,
                   onRetry: () => ref.invalidate(partnerDeviceStateProvider),
                 ),
-              const SizedBox(height: AppSpacing.lg),
-              // Rule interpretations are derived from the same authorized state
-              // the panels above display, so they live here rather than in a
-              // separate screen: the facts and the user's reading of them stay
-              // side by side.
+              // Interpretations and history are derived from the same authorized
+              // partner state, so they only exist while a pair is active. With
+              // no connection there is nothing to interpret and nothing shared
+              // to recall.
+              const SizedBox(height: AppSpacing.xl),
               RuleInterpretationsSection(now: now),
               const SizedBox(height: AppSpacing.lg),
               const RecentHistoryPreview(),
-              const SizedBox(height: AppSpacing.lg),
-              // Sharing categories and connection controls (pause, disconnect,
-              // revoke) both live on the Privacy tab; Pairing only issues and
-              // redeems codes, so it is not where sharing is managed.
-              AppButton.secondary(
-                label: 'Manage connection and sharing',
-                onPressed: () => context.goNamed(AppRoutes.privacy),
-              ),
             ],
-            const SizedBox(height: AppSpacing.xl),
+            const SizedBox(height: AppSpacing.xxl),
             const SectionHeader(
-              title: 'Your device',
+              title: 'This device',
               subtitle: 'What this app can observe on this phone',
             ),
             _LocalDeviceOverview(now: now),
@@ -204,7 +206,8 @@ class _IncompleteProfileNotice extends ConsumerWidget {
           const AppInlineMessage(
             title: 'Finish setting up your profile',
             message:
-                'Your account exists, but no profile was saved for it. Add a display name so the person you connect with sees who you are.',
+                'Your account exists, but no profile was saved for it. Add a '
+                'display name so the person you connect with knows who you are.',
             tone: AppMessageTone.warning,
           ),
           const SizedBox(height: AppSpacing.sm),
@@ -218,169 +221,139 @@ class _IncompleteProfileNotice extends ConsumerWidget {
   }
 }
 
-/// Retains the existing local monitoring surface alongside the new partner
-/// dashboard; all fields remain explicit when unknown or unsupported.
-class _LocalDeviceOverview extends ConsumerWidget {
-  const _LocalDeviceOverview({required this.now});
-  final DateTime now;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final battery = ref.watch(currentLocalBatteryStateProvider);
-    final network = ref.watch(currentLocalNetworkStateProvider);
-    return Column(
-      children: [
-        AppCard(
-          child: battery.when(
-            data: (state) => _LocalBatterySummary(state: state, now: now),
-            loading: () => const Text('Reading local battery state…'),
-            error: (_, _) =>
-                const Text('Battery state temporarily unavailable.'),
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),        AppCard(child: network.when(
-            data: (state) => _LocalNetworkSummary(state: state, now: now),
-            loading: () => const Text('Reading local network state…'),
-            error: (_, _) =>
-                const Text('Network state temporarily unavailable.'),
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        const AppCard(child: ActivitySummaryCard()),
-        const SizedBox(height: AppSpacing.sm),
-        const AppCard(child: LocationSummaryCard()),
-      ],
-    );
-  }
-}
-
-class _LocalBatterySummary extends StatelessWidget {
-  const _LocalBatterySummary({required this.state, required this.now});
-  final BatteryState state;
-  final DateTime now;
-
-  @override
-  Widget build(BuildContext context) {
-    final charge = state.chargingState;
-    final charging =
-        charge.value == BatteryChargingState.charging ||
-        charge.value == BatteryChargingState.full;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Battery & charging',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        Text(
-          'Battery: ${_localObservation(state.percentage, (value) => '$value%')}',
-        ),
-        Text('Charging: ${_localObservation(charge, _batteryChargeLabel)}'),
-        if (charging)
-          Text(
-            'Charging duration: ${_localObservation(state.chargingDuration, _durationText)}',
-          ),
-        Text(
-          'Updated: ${_relative(state.percentage.observedAt ?? charge.observedAt, now)}',
-        ),
-        Text('Freshness: ${_freshnessLabel(state.freshnessAt(now))}'),
-      ],
-    );
-  }
-}
-
-class _LocalNetworkSummary extends StatelessWidget {
-  const _LocalNetworkSummary({required this.state, required this.now});
-  final NetworkState state;
-  final DateTime now;
-
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text('Network', style: Theme.of(context).textTheme.titleMedium),
-      Text(
-        'Connection: ${_localObservation(state.connectivity, _connectivityText)}',
-      ),
-      Text(
-        'Internet access: ${_localObservation(state.internet, _internetText)}',
-      ),
-      Text('Status: ${_localObservation(state.status, _networkStatusText)}'),
-      Text('Last online: ${_relative(state.lastOnlineAt, now)}'),
-      Text('Freshness: ${_freshnessLabel(state.freshnessAt(now))}'),
-    ],
-  );
-}
-
+/// Who is being viewed, and how current their shared state is.
+///
+/// Deliberately two things only: a plain reachability statement and the age of
+/// the data. Nothing about synchronization internals reaches the user here.
 class _PartnerHeader extends StatelessWidget {
   const _PartnerHeader({
     required this.name,
     required this.state,
     required this.now,
-    required this.isFromCache,
-    required this.connectionFromCache,
   });
 
   final String name;
   final RemoteDeviceState? state;
   final DateTime now;
-  final bool isFromCache;
-  final bool connectionFromCache;
 
   @override
   Widget build(BuildContext context) {
-    final freshness =
-        state?.observationFreshnessAt(now) ?? DataFreshness.unknown;
+    final theme = Theme.of(context);
+    final reach = _reachability(state);
     final observedAt = state?.observedAt;
+    final freshness = state?.observationFreshnessAt(now) ?? DataFreshness.unknown;
+    final age = observedAt == null ? null : now.toUtc().difference(observedAt);
+
     return AppCard(
-      semanticLabel: '$name, connected partner',
-      child: Column(
+      semanticLabel: '$name, partner',
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              CircleAvatar(
-                child: Text(name.isEmpty ? '?' : name.characters.first),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          CircleAvatar(
+            child: Text(name.isEmpty ? '?' : name.characters.first),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: theme.textTheme.titleLarge,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.xs,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Text(name, style: Theme.of(context).textTheme.titleLarge),
-                    Text(
-                      connectionFromCache
-                          ? 'Last known connection · checking status'
-                          : 'Connected',
+                    StatusPill(
+                      label: reach.label,
+                      icon: reach.icon,
+                      tone: reach.tone,
                     ),
+                    if (state != null)
+                      FreshnessIndicator(
+                        freshness: freshness,
+                        age: age,
+                      ),
                   ],
                 ),
-              ),
-              const Icon(Icons.link, semanticLabel: 'Connection active'),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            observedAt == null
-                ? 'Partner device update time unknown'
-                : 'Last observed ${_relative(observedAt, now)}',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          Text('Device state: ${_freshnessLabel(freshness)}'),
-          if (isFromCache)
-            const Padding(
-              padding: EdgeInsets.only(top: AppSpacing.sm),
-              child: Text('Showing cached data.'),
+              ],
             ),
-          if (connectionFromCache && !isFromCache)
-            const Padding(
-              padding: EdgeInsets.only(top: AppSpacing.sm),
-              child: Text('Connection status is cached.'),
-            ),
+          ),
         ],
       ),
     );
   }
+}
+
+/// A reachability statement for the partner's device, in the user's words.
+///
+/// "Offline" here means *no recent shared update*, never a claim that their
+/// phone is off (Phase 20 §8): the pill says "Last known", not "Offline", so the
+/// wording cannot be read as a statement about the person.
+({String label, IconData icon, StatusTone tone}) _reachability(
+  RemoteDeviceState? state,
+) {
+  if (state == null) {
+    return (
+      label: 'No update yet',
+      icon: Icons.help_outline,
+      tone: StatusTone.neutral,
+    );
+  }
+  final observation = state.observation(DeviceMetric.deviceAvailability);
+  final value = observation.value;
+  if (observation.availability == CapabilityAvailability.available &&
+      value is String) {
+    return switch (value) {
+      'available' => (
+        label: 'Online',
+        icon: Icons.check_circle_outline,
+        tone: StatusTone.positive,
+      ),
+      'stale' => (
+        label: 'Last known',
+        icon: Icons.history_toggle_off,
+        tone: StatusTone.attention,
+      ),
+      'unknown' => (
+        label: 'Unknown',
+        icon: Icons.help_outline,
+        tone: StatusTone.neutral,
+      ),
+      final other => (
+        label: _enumLabel(other),
+        icon: Icons.help_outline,
+        tone: StatusTone.neutral,
+      ),
+    };
+  }
+  return switch (observation.availability) {
+    CapabilityAvailability.permissionDenied => (
+      label: 'Permission required',
+      icon: Icons.lock_outline,
+      tone: StatusTone.critical,
+    ),
+    CapabilityAvailability.error => (
+      label: 'Unavailable',
+      icon: Icons.error_outline,
+      tone: StatusTone.attention,
+    ),
+    CapabilityAvailability.unavailable => (
+      label: 'Not shared',
+      icon: Icons.visibility_off_outlined,
+      tone: StatusTone.neutral,
+    ),
+    CapabilityAvailability.unsupported => (
+      label: 'Unsupported',
+      icon: Icons.block_outlined,
+      tone: StatusTone.neutral,
+    ),
+    _ => (label: 'Unknown', icon: Icons.help_outline, tone: StatusTone.neutral),
+  };
 }
 
 class _PartnerContent extends StatelessWidget {
@@ -406,7 +379,7 @@ class _PartnerContent extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          AppInlineMessage(
+          const AppInlineMessage(
             title: 'Nothing is shared yet',
             message:
                 'Your partner has not shared anything yet. They choose what to '
@@ -421,44 +394,31 @@ class _PartnerContent extends StatelessWidget {
         ],
       );
     }
-    return Column(
-      children: [
-        if (sharing.isFromCache)
-          const Padding(
-            padding: EdgeInsets.only(bottom: AppSpacing.sm),
-            child: AppInlineMessage(
-              title: 'Sharing status is cached',
-              message:
-                  'These are the last known settings. Access may have changed while offline.',
-              tone: AppMessageTone.info,
-            ),
-          ),
-        stateAsync.when(
-          loading: () => const _LoadingPanel(),
-          error: (_, _) => _ErrorPanel(onRetry: onRetry),
-          data: (partner) {
-            if (partner == null) {
-              return const AppInlineMessage(
-                title: 'No device update yet',
-                message:
-                    'There is no shared device state available at this time.',
-                tone: AppMessageTone.info,
-              );
-            }
-            return _PartnerMetrics(
-              state: partner.state,
-              sharing: sharing,
-              now: now,
-            );
-          },
-        ),
-      ],
-    );
+
+    // A refresh keeps the previous value on screen. Riverpod marks the provider
+    // as loading again while keeping `hasValue`, and letting that fall through to
+    // a loader is what made the dashboard flash on every change.
+    if (!stateAsync.hasValue) {
+      if (stateAsync.hasError) return _ErrorPanel(onRetry: onRetry);
+      return const _PartnerSkeleton();
+    }
+
+    final partner = stateAsync.value;
+    if (partner == null) {
+      return const AppInlineMessage(
+        title: 'No shared update yet',
+        message: 'There is no shared device state available at this time.',
+        tone: AppMessageTone.info,
+      );
+    }
+
+    return _PartnerSections(state: partner.state, sharing: sharing, now: now);
   }
 }
 
-class _PartnerMetrics extends StatelessWidget {
-  const _PartnerMetrics({
+/// The partner's shared state, grouped into a few meaningful sections.
+class _PartnerSections extends StatelessWidget {
+  const _PartnerSections({
     required this.state,
     required this.sharing,
     required this.now,
@@ -471,170 +431,169 @@ class _PartnerMetrics extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final canShowBattery = sharing.shares(SharingCategory.battery);
-
     final canShowCharging = sharing.shares(SharingCategory.charging);
     final canShowNetwork = sharing.shares(SharingCategory.network);
     final canShowActivity = sharing.shares(SharingCategory.activityIndicators);
     final canShowLocation = sharing.shares(SharingCategory.location);
     final canShowHome = sharing.shares(SharingCategory.distanceFromHome);
-    final location = canShowLocation ? state.location : null;
+
     final charge = state.observation(DeviceMetric.chargingState);
     final charging = charge.value == 'charging';
     final duration = state.observation(DeviceMetric.chargingDuration);
+    final location = canShowLocation ? state.location : null;
 
-    return Column(
-      children: [
-        _StateCard(
-          title: 'Device availability',
-          icon: Icons.devices_outlined,
+    final sections = <Widget>[
+      if (canShowBattery || canShowCharging)
+        SectionCard(
+          title: 'Battery',
+          icon: Icons.battery_charging_full_outlined,
           rows: [
-            _StateRow(
-              'Availability',
-              _availabilityLabel(
-                state.observation(DeviceMetric.deviceAvailability),
+            if (canShowBattery)
+              StateRow(
+                label: 'Charge',
+                value: _metric(
+                  state,
+                  DeviceMetric.batteryPercentage,
+                  now,
+                  suffix: '%',
+                ),
+                emphasis: StateRowEmphasis.strong,
               ),
+            if (canShowCharging)
+              StateRow(
+                label: 'Charging',
+                value: _chargingLabel(charge),
+              ),
+            if (canShowCharging && charging)
+              StateRow(
+                label: 'Charging duration',
+                value: _durationLabel(duration),
+              ),
+          ],
+        ),
+      if (canShowNetwork)
+        SectionCard(
+          title: 'Connection',
+          icon: Icons.wifi_outlined,
+          rows: [
+            StateRow(
+              label: 'Connectivity',
+              value: _metric(state, DeviceMetric.networkStatus, now),
+              emphasis: StateRowEmphasis.strong,
             ),
-            _StateRow(
-              'Last online',
-              state.lastOnlineAt == null
+            StateRow(
+              label: 'Last online',
+              value: state.lastOnlineAt == null
                   ? 'Unknown'
                   : _relative(state.lastOnlineAt!, now),
             ),
           ],
         ),
-        if (canShowBattery || canShowCharging) ...[
-          const SizedBox(height: AppSpacing.sm),
-          _StateCard(
-            title: 'Battery & charging',
-            icon: Icons.battery_charging_full,
-            rows: [
-              if (canShowBattery)
-                _StateRow(
-                  'Battery',
-                  _metric(
-                    state,
-                    DeviceMetric.batteryPercentage,
-                    now,
-                    suffix: '%',
-                  ),
-                ),
-              if (canShowCharging)
-                _StateRow('Charging', _chargingLabel(charge)),
-              if (canShowCharging && charging)
-                _StateRow('Charging duration', _durationLabel(duration)),
-              if (canShowBattery || canShowCharging)
-                _StateRow('Updated', _relative(state.observedAt, now)),
-            ],
-          ),
-        ],
-        if (canShowNetwork) ...[
-          const SizedBox(height: AppSpacing.sm),
-          _StateCard(
-            title: 'Network',
-            icon: Icons.wifi_outlined,
-            rows: [
-              _StateRow(
-                'Connectivity',
-                _metric(state, DeviceMetric.networkStatus, now),
-              ),
-              _StateRow(
-                'Last online',
-                state.lastOnlineAt == null
-                    ? 'Unknown'
-                    : _relative(state.lastOnlineAt!, now),
-              ),
-            ],
-          ),
-        ],
-        if (canShowActivity) ...[
-          const SizedBox(height: AppSpacing.sm),
-          _StateCard(
-            title: 'Activity indicators',
-            icon: Icons.phone_android,
-            rows: [
-              _StateRow(
-                'Screen',
-                _metric(state, DeviceMetric.screenState, now),
-              ),
-              _StateRow(
-                'Activity state',
-                _metric(state, DeviceMetric.activityState, now),
-              ),
-              _StateRow(
-                'Last observable activity',
-                state.lastActivityAt == null
-                    ? 'Unknown'
-                    : _relative(state.lastActivityAt!, now),
-              ),
-            ],
-          ),
-        ],
-        if (canShowLocation || canShowHome) ...[
-          const SizedBox(height: AppSpacing.sm),
-          _locationCard(location, canShowLocation, canShowHome, now),
-        ],
-        const SizedBox(height: AppSpacing.sm),
-        _StateCard(
-          title: 'Sharing & privacy',
-          icon: Icons.shield_outlined,
+      if (canShowActivity)
+        SectionCard(
+          title: 'Screen and activity',
+          icon: Icons.phone_android_outlined,
           rows: [
-            _StateRow('Sharing', sharing.paused ? 'Paused' : 'Active'),
-            _StateRow(
-              'Categories shared',
-              sharing.categories
-                  .where(
-                    (category) =>
-                        category != SharingCategory.ruleInterpretations,
-                  )
-                  .map(_categoryLabel)
-                  .join(', '),
+            StateRow(
+              label: 'Screen',
+              value: _metric(state, DeviceMetric.screenState, now),
+              emphasis: StateRowEmphasis.strong,
+            ),
+            StateRow(
+              label: 'Activity',
+              value: _metric(state, DeviceMetric.activityState, now),
+            ),
+            StateRow(
+              label: 'Last activity',
+              value: state.lastActivityAt == null
+                  ? 'Unknown'
+                  : _relative(state.lastActivityAt!, now),
             ),
           ],
         ),
+      if (canShowLocation || canShowHome)
+        _locationSection(location, canShowLocation, canShowHome, now),
+      SectionCard(
+        title: 'Sharing',
+        icon: Icons.shield_outlined,
+        subtitle: 'What your partner has chosen to share with you',
+        rows: [
+          StateRow(
+            label: 'Status',
+            value: sharing.paused ? 'Paused' : 'Active',
+          ),
+          StateRow(
+            label: 'Categories',
+            value: sharing.categories
+                .where(
+                  (category) =>
+                      category != SharingCategory.ruleInterpretations,
+                )
+                .map(_categoryLabel)
+                .join(', '),
+          ),
+        ],
+        footer: AppButton.secondary(
+          label: 'Manage connection and sharing',
+          onPressed: () => context.goNamed(AppRoutes.privacy),
+        ),
+      ),
+    ];
+
+    return Column(
+      children: [
+        for (var index = 0; index < sections.length; index++) ...[
+          if (index > 0) const SizedBox(height: AppSpacing.md),
+          sections[index],
+        ],
       ],
     );
   }
 
-  Widget _locationCard(
+  Widget _locationSection(
     RemoteLocationState? location,
     bool canShowLocation,
     bool canShowHome,
     DateTime now,
   ) {
-    final rows = <_StateRow>[];
+    final rows = <StateRow>[];
     if (!canShowLocation) {
-      rows.add(const _StateRow('Location', 'Not shared'));
+      rows.add(const StateRow(label: 'Location', value: 'Not shared'));
     } else if (location == null || !location.hasCoordinates) {
       rows.add(
-        _StateRow(
-          'Location',
-          location == null
+        StateRow(
+          label: 'Location',
+          value: location == null
               ? 'Unavailable'
               : _availabilityLabel(
                   StateObservation<Object?>(
                     availability: location.availability,
                   ),
                 ),
+          emphasis: StateRowEmphasis.strong,
         ),
       );
     } else {
       final freshness = location.freshnessAt(now);
       rows.add(
-        _StateRow(
-          freshness == DataFreshness.stale ? 'Last known location' : 'Location',
-          freshness == DataFreshness.unknown
+        StateRow(
+          label: freshness == DataFreshness.stale
+              ? 'Last known location'
+              : 'Location',
+          value: freshness == DataFreshness.unknown
               ? 'Update time unknown'
-              : 'Updated ${_relative(location.observedAt, now)} · ${_freshnessLabel(freshness)}',
+              : 'Updated ${_relative(location.observedAt, now)}',
+          emphasis: StateRowEmphasis.strong,
         ),
       );
       if (location.approximate) {
-        rows.add(const _StateRow('Precision', 'Approximate'));
+        rows.add(const StateRow(label: 'Precision', value: 'Approximate'));
       }
       if (location.accuracyMeters != null) {
         rows.add(
-          _StateRow(
-            'Approximate accuracy',
-            '±${location.accuracyMeters!.round()} m',
+          StateRow(
+            label: 'Accuracy',
+            value: '±${location.accuracyMeters!.round()} m',
           ),
         );
       }
@@ -643,11 +602,11 @@ class _PartnerMetrics extends StatelessWidget {
       final distance = location?.distanceFromHomeKm;
       if (distance != null && location?.hasCoordinates == true) {
         rows.add(
-          _StateRow(
-            location!.freshnessAt(now) == DataFreshness.stale
-                ? 'Last known distance from home'
+          StateRow(
+            label: location!.freshnessAt(now) == DataFreshness.stale
+                ? 'Last known distance'
                 : 'Distance from home',
-            '${(distance * 1000).round()} m',
+            value: '${(distance * 1000).round()} m',
           ),
         );
       }
@@ -655,18 +614,22 @@ class _PartnerMetrics extends StatelessWidget {
           ? 'stale'
           : location?.presence?.name;
       rows.add(
-        _StateRow('At home / away', switch (presence) {
-          'atHome' => 'At home',
-          'nearHome' => 'Near home',
-          'awayFromHome' => 'Away from home',
-          'stale' => 'Last known status is stale',
-          'unsupported' => 'Unsupported',
-          _ => 'Unknown',
-        }),
+        StateRow(
+          label: 'At home',
+          value: switch (presence) {
+            'atHome' => 'At home',
+            'nearHome' => 'Near home',
+            'awayFromHome' => 'Away',
+            'stale' => 'Last known status is stale',
+            'unsupported' => 'Unsupported',
+            _ => 'Unknown',
+          },
+          emphasis: StateRowEmphasis.strong,
+        ),
       );
     }
-    return _StateCard(
-      title: 'Location & home',
+    return SectionCard(
+      title: 'Location and home',
       icon: Icons.location_on_outlined,
       rows: rows,
       // Offered only for a usable coordinate the partner has actually shared;
@@ -678,70 +641,158 @@ class _PartnerMetrics extends StatelessWidget {
   }
 }
 
-class _StateCard extends StatelessWidget {
-  const _StateCard({
-    required this.title,
-    required this.icon,
-    required this.rows,
-    this.footer,
-  });
+/// The local monitoring surface: what this app can observe on this phone.
+///
+/// Kept below the partner content because the screen exists to answer questions
+/// about the partner; this section is reference material about the user's own
+/// device and never competes with the partner state for attention.
+class _LocalDeviceOverview extends ConsumerWidget {
+  const _LocalDeviceOverview({required this.now});
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final battery = ref.watch(currentLocalBatteryStateProvider);
+    final network = ref.watch(currentLocalNetworkStateProvider);
+    return Column(
+      children: [
+        if (battery.hasValue)
+          _LocalBatterySummary(state: battery.requireValue, now: now)
+        else if (battery.hasError)
+          const _UnavailableSection(
+            title: 'Battery',
+            icon: Icons.battery_charging_full_outlined,
+          )
+        else
+          const SectionSkeleton(
+            title: 'Battery',
+            icon: Icons.battery_charging_full_outlined,
+            rows: 2,
+          ),
+        const SizedBox(height: AppSpacing.md),
+        if (network.hasValue)
+          _LocalNetworkSummary(state: network.requireValue, now: now)
+        else if (network.hasError)
+          const _UnavailableSection(title: 'Network', icon: Icons.wifi_outlined)
+        else
+          const SectionSkeleton(
+            title: 'Network',
+            icon: Icons.wifi_outlined,
+            rows: 3,
+          ),
+        const SizedBox(height: AppSpacing.md),
+        // These cards bring their own section container, so they are not
+        // wrapped again.
+        const ActivitySummaryCard(),
+        const SizedBox(height: AppSpacing.md),
+        const LocationSummaryCard(),
+      ],
+    );
+  }
+}
+
+/// A local section whose platform read failed. States the failure rather than
+/// leaving a placeholder on screen forever.
+class _UnavailableSection extends StatelessWidget {
+  const _UnavailableSection({required this.title, required this.icon});
 
   final String title;
   final IconData icon;
-  final List<_StateRow> rows;
-
-  /// Optional action rendered under the rows (for example "Open in Google
-  /// Maps" for an authorized location).
-  final Widget? footer;
 
   @override
-  Widget build(BuildContext context) => AppCard(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, semanticLabel: title),
-            const SizedBox(width: AppSpacing.sm),
-            Text(title, style: Theme.of(context).textTheme.titleMedium),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        for (final row in rows)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(child: Text(row.label)),
-                const SizedBox(width: AppSpacing.sm),
-                Flexible(child: Text(row.value, textAlign: TextAlign.end)),
-              ],
-            ),
-          ),
-        ?footer,
-      ],
-    ),
+  Widget build(BuildContext context) => SectionCard(
+    title: title,
+    icon: icon,
+    rows: const [
+      StateRow(label: 'Status', value: 'Temporarily unavailable'),
+    ],
   );
 }
 
-class _StateRow {
-  const _StateRow(this.label, this.value);
-  final String label;
-  final String value;
+class _LocalBatterySummary extends StatelessWidget {
+  const _LocalBatterySummary({required this.state, required this.now});
+  final BatteryState state;
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    final charge = state.chargingState;
+    final charging =
+        charge.value == BatteryChargingState.charging ||
+        charge.value == BatteryChargingState.full;
+    return SectionCard(
+      title: 'Battery',
+      icon: Icons.battery_charging_full_outlined,
+      rows: [
+        StateRow(
+          label: 'Charge',
+          value: _localObservation(state.percentage, (value) => '$value%'),
+          emphasis: StateRowEmphasis.strong,
+        ),
+        StateRow(label: 'Charging', value: _localObservation(charge, _batteryChargeLabel)),
+        if (charging)
+          StateRow(
+            label: 'Charging duration',
+            value: _localObservation(state.chargingDuration, _durationText),
+          ),
+        StateRow(
+          label: 'Updated',
+          value: _relative(
+            state.percentage.observedAt ?? charge.observedAt,
+            now,
+          ),
+        ),
+      ],
+    );
+  }
 }
 
-class _LoadingPanel extends StatelessWidget {
-  const _LoadingPanel();
+class _LocalNetworkSummary extends StatelessWidget {
+  const _LocalNetworkSummary({required this.state, required this.now});
+  final NetworkState state;
+  final DateTime now;
+
   @override
-  Widget build(BuildContext context) => const AppCard(
-    child: Row(
-      children: [
-        CircularProgressIndicator(),
-        SizedBox(width: AppSpacing.md),
-        Text('Loading partner state…'),
+  Widget build(BuildContext context) {
+    return SectionCard(
+      title: 'Network',
+      icon: Icons.wifi_outlined,
+      rows: [
+        StateRow(
+          label: 'Connection',
+          value: _localObservation(state.connectivity, _connectivityText),
+          emphasis: StateRowEmphasis.strong,
+        ),
+        StateRow(
+          label: 'Internet access',
+          value: _localObservation(state.internet, _internetText),
+        ),
+        StateRow(
+          label: 'Status',
+          value: _localObservation(state.status, _networkStatusText),
+        ),
+        StateRow(
+          label: 'Last online',
+          value: _relative(state.lastOnlineAt, now),
+        ),
       ],
-    ),
+    );
+  }
+}
+
+/// Initial load placeholder: mirrors the loaded layout so the screen does not
+/// jump when the first value arrives, and never covers the whole screen in a
+/// spinner for a small state read.
+class _PartnerSkeleton extends StatelessWidget {
+  const _PartnerSkeleton();
+
+  @override
+  Widget build(BuildContext context) => const Column(
+    children: [
+      SectionSkeleton(rows: 2),
+      SizedBox(height: AppSpacing.md),
+      SectionSkeleton(rows: 3),
+    ],
   );
 }
 
@@ -799,6 +850,8 @@ class _ConnectionEmptyState extends StatelessWidget {
   }
 }
 
+// --------------------------------------------------------------- formatting --
+
 String _metric(
   RemoteDeviceState state,
   DeviceMetric metric,
@@ -811,8 +864,8 @@ String _metric(
       value == null) {
     return _availabilityLabel(observation);
   }
-  return '${value is String ? _enumLabel(value) : value}$suffix'
-      '${_freshnessNote(observation.freshnessAt(now))}';
+  final rendered = value is String ? _enumLabel(value) : '$value';
+  return '$rendered$suffix${_freshnessNote(observation.freshnessAt(now))}';
 }
 
 /// Marks a partner value that is no longer current as the last known one.
@@ -876,13 +929,6 @@ String _enumLabel(String value) => value
     )
     .replaceAll('_', ' ')
     .replaceFirstMapped(RegExp(r'^.'), (match) => match[0]!.toUpperCase());
-
-String _freshnessLabel(DataFreshness value) => switch (value) {
-  DataFreshness.fresh => 'Fresh',
-  DataFreshness.recent => 'Recently updated',
-  DataFreshness.stale => 'Stale',
-  DataFreshness.unknown => 'Unknown',
-};
 
 String _relative(DateTime? timestamp, DateTime now) {
   if (timestamp == null) return 'unknown';

@@ -10,8 +10,28 @@ abstract final class AppSpacing {
   static const double lg = 24;
   static const double xl = 32;
 
+  /// Between-section separation on a long screen. Larger than [xl] so the eye
+  /// can group sections without a divider or a heavier surface.
+  static const double xxl = 40;
+
   /// Corner radius for cards and controls.
   static const double radius = 12;
+}
+
+/// Corner radii (SRS Task 12).
+///
+/// A deliberately small set: controls and small containers use [sm], cards and
+/// sheets use [md] (the historical [AppSpacing.radius] value, kept so existing
+/// layouts are unchanged), and large surfaces such as the map use [lg].
+abstract final class AppRadius {
+  /// Small controls, chips and inline status pills.
+  static const double sm = 8;
+
+  /// Cards, dialogs and text fields.
+  static const double md = 12;
+
+  /// Large surfaces: map viewports, hero panels.
+  static const double lg = 16;
 }
 
 /// Fixed durations used by the UI.

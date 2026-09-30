@@ -207,7 +207,9 @@ void main() {
     );
 
     expect(find.text('Nadia'), findsOneWidget);
-    expect(find.textContaining('Stale'), findsWidgets);
+    // Stale data is still stated explicitly in the value itself, so it can
+    // never be mistaken for a current reading.
+    expect(find.textContaining('stale'), findsWidgets);
     expect(find.text('Battery'), findsWidgets);
     expect(find.text('72% · stale'), findsOneWidget);
     expect(find.text('Location & home'), findsNothing);

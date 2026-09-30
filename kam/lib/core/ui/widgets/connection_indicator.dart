@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../connectivity/connection_status.dart';
-import '../../constants/app_spacing.dart';
+import 'status_pill.dart';
 
 /// A compact, calm statement of the connection state (Phase 20 §25, §26).
 ///
@@ -90,6 +90,22 @@ class ConnectionIndicator extends StatelessWidget {
     return true;
   }
 
+  /// Tone for [status].
+  ///
+  /// A refused write is the only thing that is genuinely an error the user may
+  /// have to act on. A dropped connection is worth noticing, not alarming, so it
+  /// stays in the calm [StatusTone.attention] band rather than reading as a
+  /// failure — the app is reassuring, not alarming (Phase 20 §25, §26).
+  static StatusTone toneFor(ConnectionStatus status) {
+    if (status.isBlocked) return StatusTone.critical;
+    if (status.isOffline ||
+        status.isRetrying ||
+        status.recovery == RecoveryState.inProgress) {
+      return StatusTone.attention;
+    }
+    return StatusTone.neutral;
+  }
+
   @override
   Widget build(BuildContext context) {
     final label = labelFor(status);
@@ -97,41 +113,12 @@ class ConnectionIndicator extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final needsAttention =
-        status.isBlocked || status.isOffline || status.isRetrying;
-    final (foreground, background) = needsAttention
-        ? (scheme.onErrorContainer, scheme.errorContainer)
-        : (scheme.onSurfaceVariant, scheme.surfaceContainerHighest);
-
-    return Semantics(
-      liveRegion: true,
+    return StatusPill(
       label: label,
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.sm,
-        ),
-        decoration: BoxDecoration(
-          color: background,
-          borderRadius: BorderRadius.circular(AppSpacing.radius),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(_iconFor(status), size: 16, color: foreground),
-            const SizedBox(width: AppSpacing.sm),
-            Flexible(
-              child: Text(
-                label,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(color: foreground),
-              ),
-            ),
-          ],
-        ),
-      ),
+      icon: _iconFor(status),
+      tone: toneFor(status),
+      semanticLabel: label,
+      liveRegion: true,
     );
   }
 }
