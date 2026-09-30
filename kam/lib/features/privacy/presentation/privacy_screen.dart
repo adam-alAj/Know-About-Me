@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../app/router/app_routes.dart';
+import '../../../core/ui/widgets/app_button.dart';
 import '../../../core/ui/widgets/app_card.dart';
 import '../../../core/ui/widgets/app_scaffold.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
@@ -351,6 +354,13 @@ class _HomeLocationCardState extends ConsumerState<_HomeLocationCard> {
     );
   }
 
+  /// Opens the map picker, where the home point is chosen directly instead of
+  /// being taken from wherever this device happens to be.
+  Future<void> _identifyOnMap() async {
+    if (_busy) return;
+    await context.pushNamed(AppRoutes.homeLocationMap);
+  }
+
   void _message(String text) {
     if (!mounted) return;
     ScaffoldMessenger.of(
@@ -387,12 +397,18 @@ class _HomeLocationCardState extends ConsumerState<_HomeLocationCard> {
             'you choose to share.',
           ),
           const SizedBox(height: 12),
-          OutlinedButton.icon(
+          AppButton(
+            label: 'Identify home on map',
+            icon: Icons.map_outlined,
+            onPressed: _busy ? null : _identifyOnMap,
+          ),
+          const SizedBox(height: 8),
+          AppButton.secondary(
+            label: home == null
+                ? 'Use current location'
+                : 'Update from current location',
+            icon: Icons.my_location,
             onPressed: _busy ? null : _save,
-            icon: const Icon(Icons.home_outlined),
-            label: Text(
-              home == null ? 'Set home location' : 'Update home location',
-            ),
           ),
           if (home != null)
             TextButton(

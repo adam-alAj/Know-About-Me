@@ -24,6 +24,7 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -684,12 +685,26 @@ class MainActivity : FlutterActivity() {
 
     private fun readActivityState(): Map<String, Any?> {
         return try {
+            // The documented source for display state is the device's interactive
+            // state (Phase 9 ACTIVITY_AVAILABILITY.md). A non-interactive device
+            // has its display off or in a low-power doze state (always-on
+            // display), which is a display that is not usable: reporting it as
+            // "off" is the honest technical fact. Reading only
+            // Display.getState() returned STATE_DOZE on such devices, which the
+            // mapper treated as "no value", so the previous "on" was never
+            // replaced.
+            val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!power.isInteractive()) {
+                return mapOf("screenState" to "off", "screenStateSupported" to true)
+            }
             val displays = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
             val display = displays.getDisplay(android.view.Display.DEFAULT_DISPLAY)
                 ?: return mapOf("screenState" to null, "screenStateSupported" to true)
             val state = when (display.state) {
                 android.view.Display.STATE_ON -> "on"
                 android.view.Display.STATE_OFF -> "off"
+                // Interactive but not reported as a settled on/off state:
+                // report no value rather than guessing the display state.
                 else -> null
             }
             mapOf("screenState" to state, "screenStateSupported" to true)

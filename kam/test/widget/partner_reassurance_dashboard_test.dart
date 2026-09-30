@@ -213,5 +213,62 @@ void main() {
     expect(find.text('Location & home'), findsNothing);
     expect(find.textContaining('user-b'), findsNothing);
   });
+
+  testWidgets('a partner value that stopped advancing reads as last known', (
+    tester,
+  ) async {
+    final now = DateTime.now().toUtc();
+    // The partner's connectivity is timestamped with their own last-confirmed-
+    // online time. Five minutes without an update is no longer fresh but is not
+    // stale either: the row must read as last known, never as a live "Online".
+    final state = RemoteDeviceState(
+      pairId: 'pair-a',
+      ownerUserId: 'user-b',
+      observations: {
+        DeviceMetric.networkStatus: StateObservation<Object?>(
+          availability: CapabilityAvailability.available,
+          value: 'online',
+          observedAt: now.subtract(const Duration(minutes: 5)),
+        ),
+      },
+      schemaVersion: 1,
+      receivedAt: now,
+      isFromCache: false,
+      observedAt: now.subtract(const Duration(minutes: 5)),
+    );
+
+    await pumpTestApp(
+      tester,
+      overrides: [
+        pairMembershipsProvider.overrideWith(
+          (ref) => Stream.value(const [
+            PairMembership(
+              pairId: 'pair-a',
+              memberIds: ['user-a', 'user-b'],
+              status: 'active',
+            ),
+          ]),
+        ),
+        partnerScopeProvider.overrideWithValue(
+          const AsyncData<PartnerScope?>(
+            PartnerScope(pairId: 'pair-a', partnerUserId: 'user-b'),
+          ),
+        ),
+        partnerDisplayNameProvider.overrideWith((ref) => Stream.value('Nadia')),
+        partnerSharingProvider.overrideWith(
+          (ref) => Stream.value(const PairSharingState(
+            paused: false,
+            categories: {SharingCategory.network},
+          )),
+        ),
+        partnerDeviceStateProvider.overrideWith(
+          (ref) => Stream.value(PartnerDeviceState(state)),
+        ),
+      ],
+    );
+
+    expect(find.text('Online · last known'), findsOneWidget);
+    expect(find.text('Online'), findsNothing);
+  });
 }
 

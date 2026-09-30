@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../../../pairing/domain/models/partner_scope.dart';
 import '../../domain/models/device_state_snapshot.dart';
 import '../../domain/models/pair_sharing_state.dart';
@@ -69,17 +71,58 @@ class DeviceStateSyncCoordinator {
   /// Called on every local change; the service decides whether anything
   /// actually needs to be written.
   void onLocalSnapshot(DeviceStateSnapshot snapshot) {
+    final previous = _latestSnapshot;
     _latestSnapshot = snapshot;
     final scope = _scope;
     if (scope == null) return;
-    _service.requestPublish(
-      SyncRequest(
-        pairId: scope.pairId,
-        snapshot: snapshot,
-        sharedCategories: _sharing.categories,
-        sharingPaused: _sharing.paused,
-      ),
+    final request = SyncRequest(
+      pairId: scope.pairId,
+      snapshot: snapshot,
+      sharedCategories: _sharing.categories,
+      sharingPaused: _sharing.paused,
     );
+    if (_isSignificantTransition(previous, snapshot)) {
+      // Publish meaningful screen/charging transitions at once rather than
+      // after the coalescing window. The coalescing timer does not run while the
+      // process is backgrounded, so leaving a screen-off transition to the
+      // timer would mean the partner never saw the change. The change tracker
+      // still prevents a duplicate write from a later trigger.
+      unawaited(
+        _service.publishNow(
+          pairId: request.pairId,
+          snapshot: request.snapshot,
+          sharedCategories: request.sharedCategories,
+          sharingPaused: request.sharingPaused,
+        ),
+      );
+      return;
+    }
+    _service.requestPublish(request);
+  }
+
+  /// Whether [current] carries a transition the partner needs promptly.
+  ///
+  /// Only discrete state changes qualify. Battery level and other continuously
+  /// varying values stay on the coalesced path, so a burst of readings still
+  /// produces at most one write.
+  static bool _isSignificantTransition(
+    DeviceStateSnapshot? previous,
+    DeviceStateSnapshot current,
+  ) {
+    if (previous == null) return false;
+    final beforeScreen = previous.activity?.screenState.value;
+    final afterScreen = current.activity?.screenState.value;
+    if (beforeScreen != null && afterScreen != null && beforeScreen != afterScreen) {
+      return true;
+    }
+    final beforeCharging = previous.battery?.chargingState.value;
+    final afterCharging = current.battery?.chargingState.value;
+    if (beforeCharging != null &&
+        afterCharging != null &&
+        beforeCharging != afterCharging) {
+      return true;
+    }
+    return false;
   }
 
   /// Re-requests publication of the latest snapshot.

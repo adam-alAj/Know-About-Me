@@ -811,9 +811,21 @@ String _metric(
       value == null) {
     return _availabilityLabel(observation);
   }
-  final stale = observation.freshnessAt(now) == DataFreshness.stale;
-  return '${value is String ? _enumLabel(value) : value}$suffix${stale ? ' · stale' : ''}';
+  return '${value is String ? _enumLabel(value) : value}$suffix'
+      '${_freshnessNote(observation.freshnessAt(now))}';
 }
+
+/// Marks a partner value that is no longer current as the last known one.
+///
+/// The partner's own observation age is the only evidence available: once their
+/// state stops advancing, an old value must not read as a live one. It is never
+/// turned into an "offline" claim — an absent update is not proof that the
+/// partner's device is off or offline (Phase 20 §8).
+String _freshnessNote(DataFreshness freshness) => switch (freshness) {
+  DataFreshness.recent => ' · last known',
+  DataFreshness.stale => ' · stale',
+  DataFreshness.fresh || DataFreshness.unknown => '',
+};
 
 String _chargingLabel(StateObservation<Object?> observation) {
   if (observation.availability != CapabilityAvailability.available ||

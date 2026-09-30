@@ -54,6 +54,8 @@ Files:
   — single-fix persistence.
 - `features/device_state/presentation/widgets/location_summary_card.dart` —
   debug visibility and the explicit permission action.
+- `features/location/presentation/home_location_map_screen.dart` — the map
+  picker used to identify home (see §12).
 
 ## 3. Location model
 
@@ -188,6 +190,31 @@ Create / update / delete go through the existing `profile_controller`
 (`setHomeLocation`, `setHomeLocation(null)`); restrict/disable uses the
 `HomeLocation.enabled` flag, which is persisted with the profile and defaults to
 enabled for documents written before the flag existed.
+
+### Identifying home on a map
+
+The Privacy screen's *Home location* card offers two ways to set the point:
+
+- **Identify home on map** opens `HomeLocationMapScreen`, an in-app map
+  (`flutter_map` over OpenStreetMap tiles, `latlong2` coordinates) with a pin
+  fixed at the centre of the map. The user pans until the pin is on their home
+  and confirms; the point under the pin is what is stored. The map opens at the
+  configured home, or otherwise at this device's fix, so it never starts at a
+  wide view and jumps. If neither exists it opens wide with an explicit notice
+  and the user can still pan to a home.
+- **Use current location** / **Update from current location** keeps the earlier
+  direct action: the stored point becomes this device's current fix.
+
+An update preserves the existing label, radius and enabled flag; only the point
+changes. The map is an action, not an observation: it records no trail, performs
+no polling, and infers nothing from movement. Map tiles are the only network
+request the screen makes, and the coordinate is never placed in a URL, log or
+error message. Tiles are served by the public OpenStreetMap tile servers under
+their [tile usage policy](https://operations.osmfoundation.org/policies/tiles);
+attribution is rendered on the map, and a private two-person app is well within
+light-use expectations. If the app ever needs heavier use, a self-hosted or
+commercial tile endpoint should replace the public one at that single
+`urlTemplate`.
 
 ## 13. Home radius
 

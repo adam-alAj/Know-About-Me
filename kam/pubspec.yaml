@@ -42,6 +42,8 @@ dependencies:
   cloud_firestore: ^6.10.0
   # Persists the random, non-secret app device identity across restarts.
   shared_preferences: ^2.5.3
+  flutter_map: ^8.3.2
+  latlong2: ^0.10.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

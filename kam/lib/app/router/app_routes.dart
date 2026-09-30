@@ -25,6 +25,9 @@ abstract final class AppRoutes {
   // Partner invitation, consent, and connection management.
   static const String pairing = 'pairing';
 
+  // Home location map picker, nested under the privacy destination.
+  static const String homeLocationMap = 'home-location-map';
+
   static const String splashPath = '/splash';
   static const String signInPath = '/sign-in';
   static const String createAccountPath = '/create-account';
@@ -34,6 +37,7 @@ abstract final class AppRoutes {
   static const String privacyPath = '/privacy';
   static const String profilePath = '/profile';
   static const String pairingPath = '/pairing';
+  static const String homeLocationMapPath = '/privacy/home-location';
   static const String ruleCreatePath = '/rules/new';
 
   /// The builder location for an existing rule.

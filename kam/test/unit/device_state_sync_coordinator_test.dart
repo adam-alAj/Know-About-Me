@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kam/core/domain/device_metric.dart';
 import 'package:kam/features/device_state/data/sync/device_state_sync_coordinator.dart';
+import 'package:kam/features/device_state/domain/models/activity_state.dart';
 import 'package:kam/features/device_state/domain/models/battery_state.dart';
 import 'package:kam/features/device_state/domain/models/device_state_snapshot.dart';
 import 'package:kam/features/device_state/domain/models/pair_sharing_state.dart';
@@ -110,6 +111,35 @@ void main() {
     expect(cachedOnly.isConfirmed, isFalse);
   });
 
+  test('a screen transition publishes at once, not on the coalescing timer', () async {
+    final scheduler = _ManualScheduler();
+    final gateway = _RecordingGateway();
+    final coordinator = _coordinator(gateway: gateway, scheduler: scheduler);
+    await coordinator.updateScope(scope);
+    coordinator.updateSharing(
+      const PairSharingState(
+        paused: false,
+        categories: {SharingCategory.activityIndicators},
+      ),
+    );
+
+    // Establish the "on" state through the normal coalesced path.
+    coordinator.onLocalSnapshot(_snapshotWithScreen(DeviceScreenState.on));
+    scheduler.fire();
+    await pumpEventQueue();
+    final writesAfterFirstChange = gateway.writes.length;
+
+    // The screen turns off. This must go out immediately: the coalescing timer
+    // does not run once the process is suspended, which is exactly why the
+    // partner kept seeing "on".
+    coordinator.onLocalSnapshot(_snapshotWithScreen(DeviceScreenState.off));
+    await pumpEventQueue();
+
+    expect(scheduler.hasPending, isFalse);
+    expect(gateway.writes.length, greaterThan(writesAfterFirstChange));
+    expect(gateway.writes.last.payload.fields['screenState'], 'off');
+  });
+
   test('changing the pair discards the previous pairing bookkeeping', () async {
     final gateway = _RecordingGateway();
     final coordinator = _coordinator(gateway: gateway);
@@ -166,6 +196,49 @@ DeviceStateSnapshot _snapshot({required DateTime observedAt}) =>
         ),
         chargingSource: const StateObservation<BatteryChargingSource>(
           availability: CapabilityAvailability.unsupported,
+        ),
+      ),
+    );
+
+DeviceStateSnapshot _snapshotWithScreen(DeviceScreenState screen) =>
+    DeviceStateSnapshot(
+      deviceId: 'device-1',
+      userId: 'user-a',
+      collectedAt: DateTime.utc(2026, 9, 28, 10, 2),
+      capabilities: const <DeviceMetric, StateObservation<Object?>>{},
+      battery: BatteryState(
+        percentage: StateObservation<int>(
+          availability: CapabilityAvailability.available,
+          value: 80,
+          observedAt: DateTime.utc(2026, 9, 28, 10, 2),
+        ),
+        chargingState: const StateObservation<BatteryChargingState>(
+          availability: CapabilityAvailability.available,
+          value: BatteryChargingState.discharging,
+        ),
+        chargingDuration: const StateObservation<Duration>(
+          availability: CapabilityAvailability.unknown,
+        ),
+        chargingSource: const StateObservation<BatteryChargingSource>(
+          availability: CapabilityAvailability.unsupported,
+        ),
+      ),
+      activity: ActivityState(
+        screenState: StateObservation<DeviceScreenState>(
+          availability: CapabilityAvailability.available,
+          value: screen,
+          observedAt: DateTime.utc(2026, 9, 28, 10, 2),
+        ),
+        activityStatus: const StateObservation<ActivityStatus>(
+          availability: CapabilityAvailability.available,
+          value: ActivityStatus.activityDetected,
+        ),
+        appLifecycle: const StateObservation<AppLifecyclePhase>(
+          availability: CapabilityAvailability.available,
+          value: AppLifecyclePhase.foreground,
+        ),
+        activityDuration: const StateObservation<Duration>(
+          availability: CapabilityAvailability.unknown,
         ),
       ),
     );

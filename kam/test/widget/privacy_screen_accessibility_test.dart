@@ -128,7 +128,12 @@ void main() {
     expect(find.text('Home location'), findsOneWidget);
     expect(find.text('Status: Not configured'), findsOneWidget);
 
-    await tester.tap(find.text('Set home location'));
+    // The map picker is the primary way to set home; the direct "use this
+    // device's fix" action is the secondary one, at the bottom of a long page.
+    expect(find.text('Identify home on map'), findsOneWidget);
+    await tester.ensureVisible(find.text('Use current location'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Use current location'));
     await tester.pumpAndSettle();
 
     final stored = profiles.preferences.homeLocation;

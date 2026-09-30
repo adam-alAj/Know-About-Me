@@ -9,6 +9,7 @@ import '../../features/auth/presentation/sign_in_screen.dart';
 import '../../features/auth/presentation/splash_screen.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/history/presentation/history_screen.dart';
+import '../../features/location/presentation/home_location_map_screen.dart';
 import '../../features/privacy/presentation/privacy_screen.dart';
 import '../../features/pairing/presentation/pairing_screen.dart';
 import '../../features/rules/presentation/rule_builder_screen.dart';
@@ -121,6 +122,16 @@ GoRouter createAppRouter({
                 path: AppRoutes.privacyPath,
                 name: AppRoutes.privacy,
                 builder: (context, state) => const PrivacyScreen(),
+                routes: <RouteBase>[
+                  // Identifying home opens above Privacy and returns to it, so
+                  // the privacy branch keeps its navigation state.
+                  GoRoute(
+                    path: 'home-location',
+                    name: AppRoutes.homeLocationMap,
+                    builder: (context, state) =>
+                        const HomeLocationMapScreen(),
+                  ),
+                ],
               ),
             ],
           ),
