@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 
 import '../../domain/models/activity_state.dart';
@@ -52,6 +54,11 @@ class DeviceMonitoringLifecycle extends StatefulWidget {
 
 class _DeviceMonitoringLifecycleState extends State<DeviceMonitoringLifecycle>
     with WidgetsBindingObserver {
+  /// Bumped on every lifecycle transition that changes what monitoring should
+  /// be doing. A slow background read can then avoid tearing down a
+  /// subscription that a following resume has just started.
+  int _lifecycleToken = 0;
+
   @override
   void initState() {
     super.initState();
@@ -72,14 +79,39 @@ class _DeviceMonitoringLifecycleState extends State<DeviceMonitoringLifecycle>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     widget.activityCollector?.reportAppLifecycle(appLifecyclePhaseOf(state));
     if (state == AppLifecycleState.resumed) {
+      _lifecycleToken++;
       widget.controller.startMonitoring();
       // A resumed app cannot assume a background listener or timer stayed
       // alive, so the connection is re-derived from fresh evidence and any
       // unfinished publish is re-requested (Phase 20 §20).
       widget.onResume?.call();
-    } else {
-      widget.controller.stopMonitoring();
+      return;
     }
+    if (state == AppLifecycleState.inactive) {
+      // `inactive` is a transient loss of focus — a system dialog, the
+      // notification shade, the moments around the screen turning off. It is
+      // not backgrounding, and tearing the observers down here would drop the
+      // very screen transition the application is meant to report. The
+      // observers are released on `hidden`/`paused`/`detached` instead.
+      return;
+    }
+    // One bounded read of the display state before releasing the observers, so
+    // a screen-off transition at the moment of backgrounding is still observed
+    // and published. This is event-driven, never a timer (Phase 9, FR-016).
+    final token = ++_lifecycleToken;
+    unawaited(_captureFinalScreenStateThenStop(token));
+  }
+
+  Future<void> _captureFinalScreenStateThenStop(int token) async {
+    try {
+      await widget.activityCollector?.refresh();
+    } catch (_) {
+      // A failed read must never block releasing the platform observers.
+    }
+    // A resume that happened while the read was in flight has superseded this
+    // stop; cancelling now would tear down the subscription it just started.
+    if (token != _lifecycleToken) return;
+    await widget.controller.stopMonitoring();
   }
 
   @override

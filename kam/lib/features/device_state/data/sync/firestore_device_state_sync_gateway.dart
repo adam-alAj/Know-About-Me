@@ -73,7 +73,15 @@ class FirestoreDeviceStateSyncGateway implements DeviceStateSyncGateway {
     required String ownerId,
     required SyncDocumentKind kind,
   }) {
-    return _document(pairId, ownerId, kind).snapshots().map((snapshot) {
+    // Metadata changes are requested explicitly. Without this, Firestore only
+    // re-emits when the *document data* changes: a cache-served snapshot whose
+    // server-confirmed twin is byte-identical never produces a second event, so
+    // `isFromCache` would stay `true` for the whole session. That is exactly
+    // what made a fully-online device keep reporting “Offline — showing last
+    // known data” (Phase 20 §9, §23).
+    return _document(pairId, ownerId, kind)
+        .snapshots(includeMetadataChanges: true)
+        .map((snapshot) {
       final data = snapshot.data();
       return RemoteStateDocument(
         data: data == null

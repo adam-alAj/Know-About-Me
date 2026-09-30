@@ -20,10 +20,12 @@ import '../../device_state/domain/models/network_state.dart';
 import '../../device_state/domain/models/pair_sharing_state.dart';
 import '../../device_state/domain/models/remote_device_state.dart';
 import '../../device_state/domain/models/state_observation.dart';
+import '../../device_state/presentation/providers/connection_providers.dart';
 import '../../device_state/presentation/providers/sync_providers.dart';
 import '../../device_state/presentation/providers/device_state_providers.dart';
 import '../../device_state/presentation/widgets/activity_summary_card.dart';
 import '../../device_state/presentation/widgets/location_summary_card.dart';
+import '../../device_state/presentation/widgets/partner_location_actions.dart';
 import '../../device_state/presentation/widgets/partner_sync_card.dart';
 import '../../history/presentation/recent_history_preview.dart';
 import '../../pairing/domain/models/pair_membership.dart';
@@ -86,8 +88,19 @@ class _PartnerReassuranceDashboardState
       ],
       body: RefreshIndicator(
         onRefresh: () async {
-          ref.invalidate(partnerDeviceStateProvider);
+          // A manual refresh re-reads the actual sources; a widget rebuild is
+          // not a data refresh (Phase 20 §21).
+          //   1. Re-collect this device's own capabilities from the platform.
+          //   2. Re-derive the connection from the latest evidence.
+          //   3. Give an unfinished publish another (coalesced) trigger.
+          //   4. Re-subscribe the authorized partner streams. Invalidating a
+          //      provider cancels its old listener and creates exactly one new
+          //      one, so no duplicate Firestore listener is left behind.
+          await ref.read(deviceMonitoringControllerProvider).collectNow();
+          ref.read(connectionStatusProvider.notifier).refresh();
+          ref.read(deviceStateSyncCoordinatorProvider)?.reassertLatest();
           ref.invalidate(partnerSharingProvider);
+          ref.invalidate(partnerDeviceStateProvider);
           ref.invalidate(partnerDisplayNameProvider);
         },
         child: ListView(
@@ -663,6 +676,11 @@ class _PartnerMetrics extends StatelessWidget {
       title: 'Location & home',
       icon: Icons.location_on_outlined,
       rows: rows,
+      // Offered only for a usable coordinate the partner has actually shared;
+      // a stale fix is labelled as the last known location, not as current.
+      footer: location != null && location.hasCoordinates
+          ? PartnerLocationActions(location: location, now: now)
+          : null,
     );
   }
 }
@@ -672,11 +690,16 @@ class _StateCard extends StatelessWidget {
     required this.title,
     required this.icon,
     required this.rows,
+    this.footer,
   });
 
   final String title;
   final IconData icon;
   final List<_StateRow> rows;
+
+  /// Optional action rendered under the rows (for example "Open in Google
+  /// Maps" for an authorized location).
+  final Widget? footer;
 
   @override
   Widget build(BuildContext context) => AppCard(
@@ -703,6 +726,7 @@ class _StateCard extends StatelessWidget {
               ],
             ),
           ),
+        ?footer,
       ],
     ),
   );

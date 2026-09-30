@@ -213,7 +213,11 @@ class PairingRepository {
   Stream<QuerySnapshot<Map<String, dynamic>>> watchPairs(String uid) => _db
       .collection('pairs')
       .where('memberIds', arrayContains: uid)
-      .snapshots();
+      // Metadata changes are observed explicitly so the cache → server
+      // transition of `isFromCache` / `hasPendingWrites` is actually reported.
+      // Without it, the first (cache) read would look permanently cache-served
+      // and a fully-online device would report itself offline.
+      .snapshots(includeMetadataChanges: true);
 
   /// Watches the caller's own consent decision for one pair.
   ///

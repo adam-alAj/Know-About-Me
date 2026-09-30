@@ -1,9 +1,11 @@
 package com.aj.kam
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.app.Notification
@@ -42,6 +44,7 @@ class MainActivity : FlutterActivity() {
     private val activityEventChannelName = "kam/device_activity/events"
     private val locationMethodChannelName = "kam/device_location"
     private val locationEventChannelName = "kam/device_location/events"
+    private val mapLauncherMethodChannelName = "kam/map_launcher"
     private var batteryReceiver: BroadcastReceiver? = null
     private var screenReceiver: BroadcastReceiver? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
@@ -297,6 +300,55 @@ class MainActivity : FlutterActivity() {
                     stopLocationUpdates()
                 }
             })
+
+        // Opening an authorized coordinate in an external map application. This
+        // is a launch-only bridge: no coordinates are logged, stored, or
+        // requested here.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, mapLauncherMethodChannelName)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "openCoordinates") {
+                    val latitude = call.argument<Double>("latitude")
+                    val longitude = call.argument<Double>("longitude")
+                    if (latitude == null || longitude == null ||
+                        latitude < -90.0 || latitude > 90.0 ||
+                        longitude < -180.0 || longitude > 180.0) {
+                        result.success(false)
+                    } else {
+                        result.success(
+                            openMapLocation(latitude, longitude, call.argument<String>("label")),
+                        )
+                    }
+                } else {
+                    result.notImplemented()
+                }
+            }
+    }
+
+    /**
+     * Starts whichever application can display a geographic coordinate.
+     *
+     * A `geo:` URI is the standard deep link; an https Google Maps link is the
+     * fallback for a device with no handler for `geo:`. Returns false when
+     * neither can be started, so the UI can say so instead of appearing to do
+     * nothing.
+     */
+    private fun openMapLocation(latitude: Double, longitude: Double, label: String?): Boolean {
+        val coordinate = "$latitude,$longitude"
+        val labelPart = if (label.isNullOrBlank()) "" else "(${Uri.encode(label)})"
+        val geoUri = Uri.parse("geo:$coordinate?q=$coordinate$labelPart")
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, geoUri))
+            return true
+        } catch (_: ActivityNotFoundException) {
+            // No geo: handler; fall through to the web map fallback.
+        }
+        val webUri = Uri.parse("https://www.google.com/maps/search/?api=1&query=$coordinate")
+        return try {
+            startActivity(Intent(Intent.ACTION_VIEW, webUri))
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        }
     }
 
     override fun onRequestPermissionsResult(

@@ -66,7 +66,11 @@ void main() {
     expect(state.chargingDuration.availability, CapabilityAvailability.unknown);
   });
 
-  test('stopping observation invalidates a charging session start', () async {
+  test('stopping observation preserves an observed charging session', () async {
+    // Regression (charging duration): monitoring is released whenever the app
+    // is backgrounded. Discarding the session there was the reason the duration
+    // was almost never shown. An observed start now survives the gap, and is
+    // cleared only by a real non-charging observation.
     final gateway = _FakeBatteryGateway(_sample(charging: 'discharging'));
     final collector = BatteryChargingCollector(gateway: gateway, now: () => observedAt);
     await collector.refresh();
@@ -75,8 +79,23 @@ void main() {
     await collector.stop();
     gateway.current = _sample(charging: 'charging');
     final resumed = await collector.refresh();
-    expect(resumed.chargingStartedAt, isNull);
-    expect(resumed.chargingDuration.availability, CapabilityAvailability.unknown);
+    expect(resumed.chargingStartedAt, observedAt);
+    expect(resumed.chargingDuration.availability, CapabilityAvailability.available);
+  });
+
+  test('charging duration is derived from the observed start timestamp', () async {
+    var now = observedAt;
+    final gateway = _FakeBatteryGateway(_sample(charging: 'discharging'));
+    final collector = BatteryChargingCollector(gateway: gateway, now: () => now);
+    await collector.refresh();
+    gateway.current = _sample(charging: 'charging');
+    await collector.refresh();
+
+    now = observedAt.add(const Duration(minutes: 95));
+    final later = await collector.refresh();
+    expect(later.chargingStartedAt, observedAt);
+    expect(later.chargingDuration.value, const Duration(minutes: 95));
+    expect(later.chargingDuration.availability, CapabilityAvailability.available);
   });
 
   test('observed transition establishes a start and session duration', () async {

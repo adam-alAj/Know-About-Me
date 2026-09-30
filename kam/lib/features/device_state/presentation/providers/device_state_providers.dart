@@ -8,6 +8,7 @@ import '../../data/providers/platform_device_state_provider.dart';
 import '../../data/activity/method_channel_activity_gateway.dart';
 import '../../data/battery/battery_platform_gateway.dart';
 import '../../data/location/method_channel_location_gateway.dart';
+import '../../data/maps/method_channel_map_launcher.dart';
 import '../../data/network/method_channel_network_gateway.dart';
 import '../../data/services/shared_preferences_activity_observation_store.dart';
 import '../../data/services/shared_preferences_location_observation_store.dart';
@@ -24,6 +25,7 @@ import '../../domain/models/network_state.dart';
 import '../../domain/repositories/device_state_repository.dart';
 import '../../domain/sources/device_state_provider.dart';
 import '../../domain/sources/device_state_source.dart';
+import '../../domain/sources/map_launcher.dart';
 import '../../domain/models/activity_state.dart';
 import '../../domain/models/device_location_state.dart';
 import '../../domain/services/activity_state_collector.dart';
@@ -41,6 +43,14 @@ final deviceStateSourceProvider = Provider<DeviceStateSource>(
   (ref) => UnavailableDeviceStateSource(
     platform: ref.watch(platformInfoProvider).platform,
   ),
+);
+
+/// Opens an authorized coordinate in the platform's map application (FR-025).
+///
+/// It carries no location data of its own and never decides authorization: the
+/// UI only offers the action for coordinates the partner has already shared.
+final mapLauncherProvider = Provider<MapLauncher>(
+  (ref) => MethodChannelMapLauncher(ref.watch(platformInfoProvider).platform.name),
 );
 
 /// What this platform/device can actually observe (FR-068).

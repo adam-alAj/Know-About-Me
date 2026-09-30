@@ -19,8 +19,12 @@ class BatteryChargingCollector {
   StreamSubscription<Object?>? _nativeSubscription;
   BatteryState _current = BatteryState.unknown;
   BatteryChargingState? _previousState;
+
+  /// When an observed charging session began, in UTC.
+  ///
+  /// The duration is *derived* from this timestamp and the current clock
+  /// (FR-010), never from a timer that can be lost across an app suspension.
   DateTime? _chargingStartedAt;
-  Stopwatch? _chargingStopwatch;
 
   BatteryState get current => _current;
   bool get isStarted => _nativeSubscription != null;
@@ -87,13 +91,21 @@ class BatteryChargingCollector {
 
   /// Stops event observation. Native receiver/notification listeners are
   /// released by the platform stream's cancellation handler.
+  ///
+  /// The observed charging session is deliberately **kept**: the application is
+  /// foreground-only, so a monitoring gap (backgrounding, a lifecycle flap) is
+  /// not evidence that charging ended. Clearing the session here was the reason
+  /// charging duration was effectively never shown — every background and
+  /// resume discarded a session the device had genuinely observed. The session
+  /// is cleared only by a real observation: a non-charging reading, an unknown
+  /// state, or a read error.
   Future<void> stop() async {
     final subscription = _nativeSubscription;
     _nativeSubscription = null;
     await subscription?.cancel();
-    // While observation is stopped, charging transitions may be missed.
-    // A later read must establish a new transition before duration is known.
-    _clearSession();
+    // Transition adjacency cannot be assumed across the gap, so the next
+    // reading must re-observe a transition before a *new* session starts. A
+    // session already in progress keeps its original start time.
     _previousState = null;
   }
 
@@ -133,12 +145,13 @@ class BatteryChargingCollector {
           (previous == BatteryChargingState.discharging ||
               previous == BatteryChargingState.notCharging)) {
         _chargingStartedAt = observedAt;
-        _chargingStopwatch = Stopwatch()..start();
       }
     } else if (next == BatteryChargingState.full) {
-      // Preserve a known session if charging-to-full was observed, but a first
-      // reading of full does not reveal when the session began.
-      if (_previousState != BatteryChargingState.charging &&
+      // Preserve a known session if charging-to-full was observed, or if the
+      // session began before a monitoring gap; a first reading of full with no
+      // known start does not reveal when the session began.
+      if (_chargingStartedAt == null &&
+          _previousState != BatteryChargingState.charging &&
           _previousState != BatteryChargingState.full) {
         _clearSession();
       }
@@ -274,8 +287,9 @@ class BatteryChargingCollector {
       );
     }
     final startedAt = _chargingStartedAt;
-    final stopwatch = _chargingStopwatch;
-    if (startedAt == null || stopwatch == null) {
+    if (startedAt == null) {
+      // Charging is real, but this instance never observed *when* it began, so
+      // the duration is genuinely unknown rather than invented (FR-010).
       return StateObservation<Duration>(
         availability: CapabilityAvailability.unknown,
         observedAt: observedAt,
@@ -283,7 +297,7 @@ class BatteryChargingCollector {
         platform: gateway.platformName,
       );
     }
-    final duration = stopwatch.elapsed;
+    final duration = observedAt.difference(startedAt);
     if (duration.isNegative || duration > const Duration(days: 30)) {
       _clearSession();
       return StateObservation<Duration>(
@@ -360,7 +374,5 @@ class BatteryChargingCollector {
 
   void _clearSession() {
     _chargingStartedAt = null;
-    _chargingStopwatch?.stop();
-    _chargingStopwatch = null;
   }
 }

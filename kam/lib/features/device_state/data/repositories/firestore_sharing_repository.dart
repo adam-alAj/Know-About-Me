@@ -21,7 +21,11 @@ class FirestoreSharingRepository implements SharingRepository {
     required String userId,
   }) {
     return _document(pairId, userId)
-        .snapshots()
+        // Metadata changes are observed explicitly: a cache-served sharing
+        // document that the server later confirms with identical data would
+        // otherwise never re-emit, and the connection would look offline and
+        // the sharing state permanently unconfirmed (Phase 20 §9, §11).
+        .snapshots(includeMetadataChanges: true)
         .map((snapshot) {
           final data = snapshot.data();
           if (data == null) return PairSharingState.none;

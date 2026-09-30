@@ -57,6 +57,33 @@ void main() {
     expect(repository.subscriptions, 2);
     expect(repository.cancellations, 1);
   });
+
+  testWidgets('a transient inactive state does not release monitoring', (
+    tester,
+  ) async {
+    // `inactive` accompanies a system dialog, the notification shade, and the
+    // first moments of the screen turning off. Releasing the observers there
+    // would drop screen transitions before they could be reported.
+    final repository = _CountingRepository();
+    final controller = DeviceMonitoringController(repository);
+
+    await tester.pumpWidget(
+      DeviceMonitoringLifecycle(
+        controller: controller,
+        child: const SizedBox.shrink(),
+      ),
+    );
+    expect(repository.subscriptions, 1);
+
+    final observer =
+        tester.state(find.byType(DeviceMonitoringLifecycle))
+            as WidgetsBindingObserver;
+    observer.didChangeAppLifecycleState(AppLifecycleState.inactive);
+    await tester.pumpAndSettle();
+
+    expect(repository.cancellations, 0);
+    expect(repository.subscriptions, 1);
+  });
 }
 
 class _CountingRepository implements DeviceStateRepository {
