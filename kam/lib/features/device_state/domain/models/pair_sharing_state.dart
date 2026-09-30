@@ -56,6 +56,20 @@ class PairSharingState {
   /// Whether anything at all may be transmitted.
   bool get sharesAnything => !paused && categories.isNotEmpty;
 
+  /// Whether any category carried by the `deviceState` document is shared.
+  ///
+  /// The device-state document has its own read gate (battery, charging,
+  /// network and activity indicators); location is a separate document with a
+  /// separate gate. Used to decide which partner documents may be read at all:
+  /// a document whose category is not shared is denied by the rules, and that
+  /// denial must not take down the document that *is* shared.
+  bool get sharesAnyDeviceState =>
+      !paused &&
+      (categories.contains(SharingCategory.battery) ||
+          categories.contains(SharingCategory.charging) ||
+          categories.contains(SharingCategory.network) ||
+          categories.contains(SharingCategory.activityIndicators));
+
   /// Whether [owner] may see [category] of their partner, for the client-side
   /// eligibility checks that run *before* a write is attempted.
   ///

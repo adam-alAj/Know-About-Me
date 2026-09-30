@@ -1416,6 +1416,146 @@ test('an unknown home presence value is rejected', async () => {
   );
 });
 
+test('a valid home presence is accepted once distanceFromHome is shared', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await seedSharing(context.firestore(), 'p1', 'uA', [
+      'battery',
+      'network',
+      'location',
+      'distanceFromHome',
+    ]);
+  });
+
+  const db = as('uA');
+  for (const presence of ['atHome', 'nearHome', 'awayFromHome']) {
+    await assertSucceeds(
+      setDoc(doc(db, 'pairs', 'p1', 'location', 'uA'), sharedLocation('uA', {
+        latitude: 52.51,
+        longitude: 13.41,
+        distanceFromHomeKm: presence === 'atHome' ? 0.05 : 7.4,
+        homePresence: presence,
+      })),
+    );
+  }
+});
+
+test('a partner read of location with lingering distance fields needs distanceFromHome', async () => {
+  // The document was written while distanceFromHome was shared; the owner has
+  // since switched that category off but has not yet retracted the fields.
+  // Field-level minimisation on READ must deny the whole document rather than
+  // expose the lingering distance or presence.
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await seedSharing(db, 'p1', 'uA', ['battery', 'network', 'location']);
+    await setDoc(doc(db, 'pairs', 'p1', 'location', 'uA'), sharedLocation('uA', {
+      latitude: 52.51,
+      longitude: 13.41,
+      distanceFromHomeKm: 0.74,
+      homePresence: 'awayFromHome',
+    }));
+  });
+
+  await assertFails(getDoc(doc(as('uB'), 'pairs', 'p1', 'location', 'uA')));
+  // The owner still sees their own document either way.
+  await assertSucceeds(getDoc(doc(as('uA'), 'pairs', 'p1', 'location', 'uA')));
+});
+
+// ------------------------------------------ charging duration ---------------
+
+test('charging duration may only be written when charging is shared', async () => {
+  // The default fixture shares battery + network only.
+  const db = as('uA');
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 71,
+      chargingDurationSeconds: 3600,
+    })),
+  );
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await seedSharing(context.firestore(), 'p1', 'uA', [
+      'battery',
+      'network',
+      'charging',
+    ]);
+  });
+  await assertSucceeds(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 71,
+      isCharging: true,
+      chargingStartedAt: ts(),
+      chargingDurationSeconds: 3600,
+    })),
+  );
+});
+
+test('a negative charging duration is rejected', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await seedSharing(context.firestore(), 'p1', 'uA', [
+      'battery',
+      'network',
+      'charging',
+    ]);
+  });
+
+  const db = as('uA');
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      isCharging: true,
+      chargingDurationSeconds: -1,
+    })),
+  );
+  // A non-integer duration is not a duration at all.
+  await assertFails(
+    setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      isCharging: true,
+      chargingDurationSeconds: 12.5,
+    })),
+  );
+});
+
+test('a partner read of state with lingering charging fields needs the charging category', async () => {
+  // Same field-level minimisation as location: a document that still carries
+  // charging fields after the owner disabled the category must not be readable
+  // by the partner, while the owner keeps full access to their own document.
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await seedSharing(db, 'p1', 'uA', ['battery', 'network']);
+    await setDoc(doc(db, 'pairs', 'p1', 'deviceState', 'uA'), sharedState('uA', {
+      batteryPercentage: 71,
+      isCharging: true,
+      chargingDurationSeconds: 3600,
+    }));
+  });
+
+  await assertFails(getDoc(doc(as('uB'), 'pairs', 'p1', 'deviceState', 'uA')));
+  await assertSucceeds(getDoc(doc(as('uA'), 'pairs', 'p1', 'deviceState', 'uA')));
+});
+
+test('a paused owner location is hidden from the partner too', async () => {
+  // Pause is document-independent: it hides location, not just device state.
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await seedSharing(db, 'p1', 'uA', ['battery', 'network', 'location', 'distanceFromHome'], true);
+    await setDoc(doc(db, 'pairs', 'p1', 'location', 'uA'), sharedLocation('uA', {
+      latitude: 52.51,
+      longitude: 13.41,
+      distanceFromHomeKm: 0.74,
+      homePresence: 'awayFromHome',
+    }));
+  });
+
+  await assertFails(getDoc(doc(as('uB'), 'pairs', 'p1', 'location', 'uA')));
+  await assertSucceeds(getDoc(doc(as('uA'), 'pairs', 'p1', 'location', 'uA')));
+  // And the paused owner cannot keep publishing location either.
+  await assertFails(
+    setDoc(doc(as('uA'), 'pairs', 'p1', 'location', 'uA'), sharedLocation('uA', {
+      latitude: 52.52,
+      longitude: 13.42,
+    })),
+  );
+});
+
 // ============================ Phase 14: rule definitions =====================
 // Rule *definitions* are private to their owner (Phase 14). These assertions are
 // the executable specification of the `users/{uid}/rules` rules block: owner
@@ -1900,10 +2040,13 @@ test('D. repeated recovery attempts address one document, never a duplicate', as
 
 test('E. a retried event is refused instead of being duplicated', async () => {
   const db = as('uA');
+  // uA shares battery + network in p1 (see the fixture), so the event must use
+  // a category that is actually enabled; the category gate is specified by
+  // "history writes require the matching enabled sharing category".
   const event = {
     ownerUserId: 'uA',
-    type: 'chargingStarted',
-    category: 'charging',
+    type: 'deviceWentOffline',
+    category: 'network',
     occurredAt: ts(),
     recordedAt: serverTimestamp(),
     source: 'device',
@@ -1919,7 +2062,7 @@ test('E. a retried event is refused instead of being duplicated', async () => {
   await assertFails(setDoc(doc(db, 'pairs', 'p1', 'events', 'e-retry'), event));
   await assertFails(
     updateDoc(doc(db, 'pairs', 'p1', 'events', 'e-retry'), {
-      type: 'chargingStopped',
+      type: 'deviceCameOnline',
     }),
   );
 

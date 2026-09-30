@@ -127,6 +127,12 @@ class PairingRepository {
       });
       return;
     }
+    // Each member records their own live-sharing switch. The rules only allow a
+    // user to write the sharing document named after themselves, so it cannot be
+    // created on a member's behalf at activation time (see `sharing` in
+    // firestore.rules). Creating it here guarantees both records exist by the
+    // moment the pair becomes active.
+    await _ensureOwnSharing(pairId, uid);
     try {
       await _syncOwnPairProfile(pairId, uid);
     } on FirebaseException {
@@ -135,6 +141,23 @@ class PairingRepository {
     }
     await _activateIfConsented(pairId);
   }
+
+  /// Creates (or leaves unchanged) this member's own sharing document so the
+  /// partner's reads have a live switch to check. Never writes another member's
+  /// record: the rules bind `sharing/{uid}` to `request.auth.uid`.
+  Future<void> _ensureOwnSharing(String pairId, String uid) =>
+      _db
+          .collection('pairs')
+          .doc(pairId)
+          .collection('sharing')
+          .doc(uid)
+          .set({
+            'userId': uid,
+            'pairId': pairId,
+            'paused': false,
+            'categories': <String>[],
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
 
   /// Copies only the user's partner-approved display name into the pair-scoped
   /// member record. The partner never receives access to `users/{uid}`.
@@ -163,20 +186,14 @@ class PairingRepository {
       if (!consents.every((c) => c.exists && c.data()?['granted'] == true)) {
         return;
       }
+      // Activation only flips the pair status. Each member's sharing document
+      // is written by that member during their own consent, because the rules
+      // forbid writing a sharing record that is not named after the caller.
       tx.update(pairRef, {
         'status': 'active',
         'activatedAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
-      for (final id in ids) {
-        tx.set(pairRef.collection('sharing').doc(id), {
-          'userId': id,
-          'pairId': pairId,
-          'paused': false,
-          'categories': <String>[],
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      }
     });
   }
 
@@ -197,6 +214,25 @@ class PairingRepository {
       .collection('pairs')
       .where('memberIds', arrayContains: uid)
       .snapshots();
+
+  /// Watches the caller's own consent decision for one pair.
+  ///
+  /// `null` means no decision has been recorded yet. Consent is immutable once
+  /// recorded, so a decided value never changes. Lets the UI stop offering the
+  /// consent buttons after this member has already decided.
+  Stream<bool?> watchOwnConsent({
+    required String pairId,
+    required String userId,
+  }) => _db
+      .collection('pairs')
+      .doc(pairId)
+      .collection('consents')
+      .doc(userId)
+      .snapshots()
+      .map((snapshot) {
+        final granted = snapshot.data()?['granted'];
+        return granted is bool ? granted : null;
+      });
 
   /// Watches only the partner-visible profile stored inside this pair.
   /// Private `users/{uid}` profiles are never queried for another user.

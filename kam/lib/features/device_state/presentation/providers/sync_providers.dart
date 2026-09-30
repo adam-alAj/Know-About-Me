@@ -95,18 +95,28 @@ final partnerDeviceStateRepositoryProvider =
 /// The partner's current synchronized state, or `null` when there is nothing to
 /// show (no active pair, or the partner has never published).
 ///
-/// The stream is recreated when the pair or the partner changes, and the old
-/// listener is cancelled by the provider scope, so exactly one partner-state
-/// listener is alive at a time (Phase 11 §21).
+/// The stream is recreated when the pair, the partner, or the partner's sharing
+/// state changes, and the old listener is cancelled by the provider scope, so
+/// exactly one partner-state listener is alive at a time (Phase 11 §21).
+///
+/// Only the documents the partner actually shares are watched. A document whose
+/// category is not shared is denied by the security rules, and that denial must
+/// not take down the partner state that *is* shared. Watching the sharing state
+/// also re-creates the listeners when the partner enables or removes a
+/// category, so a newly shared document starts streaming immediately instead of
+/// waiting for a pair change.
 final partnerDeviceStateProvider = StreamProvider<PartnerDeviceState?>((ref) {
   final scope = ref.watch(partnerScopeProvider).value;
   final repository = ref.watch(partnerDeviceStateRepositoryProvider);
   if (scope == null || repository == null) {
     return Stream<PartnerDeviceState?>.value(null);
   }
+  final sharing = ref.watch(partnerSharingProvider).value;
   return repository.watch(
     pairId: scope.pairId,
     partnerUserId: scope.partnerUserId,
+    watchDeviceState: sharing?.sharesAnyDeviceState ?? false,
+    watchLocation: sharing?.shares(SharingCategory.location) ?? false,
   );
 });
 

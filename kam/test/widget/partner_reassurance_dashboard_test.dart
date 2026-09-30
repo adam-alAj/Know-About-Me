@@ -48,6 +48,116 @@ void main() {
     expect(find.text('Your partner'), findsNothing);
   });
 
+  testWidgets('active pair with disabled categories shows the not-shared state', (
+    tester,
+  ) async {
+    final now = DateTime.now().toUtc();
+    // The partner *has* published state, but they are not sharing any category,
+    // so the dashboard must show the not-shared state and hide those metrics.
+    final state = RemoteDeviceState(
+      pairId: 'pair-a',
+      ownerUserId: 'user-b',
+      observations: {
+        DeviceMetric.batteryPercentage: StateObservation<Object?>(
+          availability: CapabilityAvailability.available,
+          value: 72,
+          observedAt: now.subtract(const Duration(hours: 1)),
+        ),
+      },
+      schemaVersion: 1,
+      receivedAt: now,
+      isFromCache: false,
+      observedAt: now.subtract(const Duration(hours: 1)),
+    );
+
+    await pumpTestApp(
+      tester,
+      overrides: [
+        pairMembershipsProvider.overrideWith(
+          (ref) => Stream.value(const [
+            PairMembership(
+              pairId: 'pair-a',
+              memberIds: ['user-a', 'user-b'],
+              status: 'active',
+            ),
+          ]),
+        ),
+        partnerScopeProvider.overrideWithValue(
+          const AsyncData<PartnerScope?>(
+            PartnerScope(pairId: 'pair-a', partnerUserId: 'user-b'),
+          ),
+        ),
+        partnerDisplayNameProvider.overrideWith((ref) => Stream.value('Nadia')),
+        partnerSharingProvider.overrideWith(
+          (ref) => Stream.value(PairSharingState.none),
+        ),
+        partnerDeviceStateProvider.overrideWith(
+          (ref) => Stream.value(PartnerDeviceState(state)),
+        ),
+      ],
+    );
+
+    expect(find.text('No partner device details are shared'), findsOneWidget);
+    expect(find.text('Choose what I share'), findsOneWidget);
+    expect(find.text('72% · stale'), findsNothing);
+    expect(find.text('Battery'), findsNothing);
+  });
+
+  testWidgets('active pair with an enabled category shows partner metrics', (
+    tester,
+  ) async {
+    final now = DateTime.now().toUtc();
+    final state = RemoteDeviceState(
+      pairId: 'pair-a',
+      ownerUserId: 'user-b',
+      observations: {
+        DeviceMetric.batteryPercentage: StateObservation<Object?>(
+          availability: CapabilityAvailability.available,
+          value: 72,
+          observedAt: now.subtract(const Duration(hours: 1)),
+        ),
+      },
+      schemaVersion: 1,
+      receivedAt: now,
+      isFromCache: false,
+      observedAt: now.subtract(const Duration(hours: 1)),
+    );
+
+    await pumpTestApp(
+      tester,
+      overrides: [
+        pairMembershipsProvider.overrideWith(
+          (ref) => Stream.value(const [
+            PairMembership(
+              pairId: 'pair-a',
+              memberIds: ['user-a', 'user-b'],
+              status: 'active',
+            ),
+          ]),
+        ),
+        partnerScopeProvider.overrideWithValue(
+          const AsyncData<PartnerScope?>(
+            PartnerScope(pairId: 'pair-a', partnerUserId: 'user-b'),
+          ),
+        ),
+        partnerDisplayNameProvider.overrideWith((ref) => Stream.value('Nadia')),
+        partnerSharingProvider.overrideWith(
+          (ref) => Stream.value(const PairSharingState(
+            paused: false,
+            categories: {SharingCategory.battery},
+          )),
+        ),
+        partnerDeviceStateProvider.overrideWith(
+          (ref) => Stream.value(PartnerDeviceState(state)),
+        ),
+      ],
+    );
+
+    expect(find.text('No partner device details are shared'), findsNothing);
+    expect(find.text('Battery'), findsWidgets);
+    expect(find.text('72% · stale'), findsOneWidget);
+  });
+
   testWidgets('shows stale state as last observed and hides disabled categories', (tester) async {
     final now = DateTime.now().toUtc();
     final state = RemoteDeviceState(

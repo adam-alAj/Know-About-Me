@@ -139,9 +139,12 @@ class _PartnerReassuranceDashboardState
               const SizedBox(height: AppSpacing.lg),
               const RecentHistoryPreview(),
               const SizedBox(height: AppSpacing.lg),
+              // Sharing categories and connection controls (pause, disconnect,
+              // revoke) both live on the Privacy tab; Pairing only issues and
+              // redeems codes, so it is not where sharing is managed.
               AppButton.secondary(
                 label: 'Manage connection and sharing',
-                onPressed: () => context.goNamed(AppRoutes.pairing),
+                onPressed: () => context.goNamed(AppRoutes.privacy),
               ),
             ],
             const SizedBox(height: AppSpacing.xl),
@@ -392,11 +395,25 @@ class _PartnerContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!sharing.sharesAnything) {
-      return const AppInlineMessage(
-        title: 'No partner device details are shared',
-        message:
-            'Sharing may be paused or no sharing categories may be enabled.',
-        tone: AppMessageTone.info,
+      // A new connection shares nothing until *each* member turns categories on
+      // for themselves, so this state is usually "the partner has not opted in
+      // yet", not a fault. Say where to do it instead of leaving the user to
+      // guess that the connection is broken.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AppInlineMessage(
+            title: 'No partner device details are shared',
+            message:
+                'Your partner has not enabled any sharing categories yet, or they paused sharing. On their device they choose categories under Privacy, in “What you share”. Nothing is shared by default, so each person decides what the other can see.',
+            tone: AppMessageTone.info,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          AppButton.secondary(
+            label: 'Choose what I share',
+            onPressed: () => context.goNamed(AppRoutes.privacy),
+          ),
+        ],
       );
     }
     return Column(

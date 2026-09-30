@@ -48,6 +48,21 @@ final partnerScopeProvider = Provider<AsyncValue<PartnerScope?>>((ref) {
   });
 });
 
+/// The signed-in user's own consent decision for one pair, keyed by pair id.
+///
+/// `null` while undecided. The pairing screen uses this to replace the consent
+/// buttons with a "waiting for the other person" state once this member has
+/// decided, because a recorded consent cannot be changed and re-submitting it is
+/// intentionally a no-op.
+final ownConsentProvider = StreamProvider.family<bool?, String>((ref, pairId) {
+  final uid = ref.watch(currentIdentityProvider)?.uid;
+  final repository = ref.watch(pairingRepositoryProvider);
+  if (uid == null || repository == null) {
+    return Stream<bool?>.value(null);
+  }
+  return repository.watchOwnConsent(pairId: pairId, userId: uid);
+});
+
 /// The partner-visible display name, read only from this pair's member record.
 final partnerDisplayNameProvider = StreamProvider<String?>((ref) {
   final scope = ref.watch(partnerScopeProvider).value;
