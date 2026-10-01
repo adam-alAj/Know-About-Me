@@ -26,6 +26,10 @@ class MethodChannelLocationGateway implements LocationPlatformGateway {
       _methodChannel.invokeMethod<Object?>('requestLocationPermission');
 
   @override
+  Future<void> openAppSettings() =>
+      _methodChannel.invokeMethod<void>('openAppSettings');
+
+  @override
   Future<Object?> readCurrentLocation() =>
       _methodChannel.invokeMethod<Object?>('getCurrentLocation');
 

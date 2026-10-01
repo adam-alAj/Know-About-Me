@@ -140,6 +140,35 @@ void main() {
     expect(gateway.writes.last.payload.fields['screenState'], 'off');
   });
 
+  test(
+    'manual reconciliation publishes and retains the freshly read snapshot',
+    () async {
+      final scheduler = _ManualScheduler();
+      final gateway = _RecordingGateway();
+      final coordinator = _coordinator(gateway: gateway, scheduler: scheduler);
+      await coordinator.updateScope(scope);
+      coordinator.updateSharing(
+        const PairSharingState(
+          paused: false,
+          categories: {SharingCategory.activityIndicators},
+        ),
+      );
+
+      await coordinator.reconcileNow(
+        _snapshotWithScreen(DeviceScreenState.on),
+      );
+      await coordinator.reconcileNow(
+        _snapshotWithScreen(DeviceScreenState.off),
+      );
+
+      expect(scheduler.hasPending, isFalse);
+      expect(gateway.writes.last.payload.fields['screenState'], 'off');
+      coordinator.reassertLatest();
+      await pumpEventQueue();
+      expect(gateway.writes.last.payload.fields['screenState'], 'off');
+    },
+  );
+
   test('changing the pair discards the previous pairing bookkeeping', () async {
     final gateway = _RecordingGateway();
     final coordinator = _coordinator(gateway: gateway);

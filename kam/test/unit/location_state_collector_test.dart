@@ -744,6 +744,9 @@ class _FakeGateway implements LocationPlatformGateway {
   }
 
   @override
+  Future<void> openAppSettings() async {}
+
+  @override
   Future<Object?> readCurrentLocation() async {
     fixReads++;
     final error = fixException;

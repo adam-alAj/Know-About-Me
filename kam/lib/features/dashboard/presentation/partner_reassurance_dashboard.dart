@@ -109,9 +109,13 @@ class _PartnerReassuranceDashboardState
           //   4. Re-subscribe the authorized partner streams. Invalidating a
           //      provider cancels its old listener and creates exactly one new
           //      one, so no duplicate Firestore listener is left behind.
-          await ref.read(deviceMonitoringControllerProvider).collectNow();
+          final localSnapshot = await ref
+              .read(deviceMonitoringControllerProvider)
+              .collectNow();
           ref.read(connectionStatusProvider.notifier).refresh();
-          ref.read(deviceStateSyncCoordinatorProvider)?.reassertLatest();
+          await ref
+              .read(deviceStateSyncCoordinatorProvider)
+              ?.reconcileNow(localSnapshot);
           ref.invalidate(partnerSharingProvider);
           ref.invalidate(partnerDeviceStateProvider);
           ref.invalidate(partnerDisplayNameProvider);

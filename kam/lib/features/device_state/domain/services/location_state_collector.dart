@@ -149,6 +149,10 @@ class LocationStateCollector {
     return _publish();
   }
 
+  /// Opens the operating system settings page when the permission prompt is no
+  /// longer available. Permission state is re-read by the normal resume path.
+  Future<void> openAppSettings() => gateway.openAppSettings();
+
   /// Starts observation: reads the current picture and subscribes to
   /// throttled platform updates when permission and the service allow it.
   Future<void> start() async {

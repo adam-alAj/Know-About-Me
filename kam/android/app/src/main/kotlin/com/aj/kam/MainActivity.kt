@@ -286,6 +286,17 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "getLocationStatus" -> result.success(locationStatusMap())
                     "requestLocationPermission" -> requestLocationPermission(result)
+                    "openAppSettings" -> {
+                        try {
+                            val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", packageName, null)
+                            }
+                            startActivity(intent)
+                            result.success(null)
+                        } catch (error: ActivityNotFoundException) {
+                            result.error("settings_unavailable", "App settings could not be opened.", null)
+                        }
+                    }
                     "getCurrentLocation" -> readCurrentLocation(result)
                     else -> result.notImplemented()
                 }

@@ -140,6 +140,7 @@ class DeviceStateSyncCoordinator {
   Future<List<SyncOutcome>> publishNow(DeviceStateSnapshot snapshot) async {
     final scope = _scope;
     if (scope == null) return const <SyncOutcome>[];
+    _latestSnapshot = snapshot;
     return _service.publishNow(
       pairId: scope.pairId,
       snapshot: snapshot,
@@ -147,6 +148,12 @@ class DeviceStateSyncCoordinator {
       sharingPaused: _sharing.paused,
     );
   }
+
+  /// Reconciles a freshly collected local snapshot through the same authorized
+  /// publish pipeline used for automatic observations. Unlike [reassertLatest],
+  /// this always advances the coordinator's snapshot before writing.
+  Future<List<SyncOutcome>> reconcileNow(DeviceStateSnapshot snapshot) =>
+      publishNow(snapshot);
 
   /// Stops synchronizing, for example on sign-out or when the pair ends.
   Future<void> stop() async {

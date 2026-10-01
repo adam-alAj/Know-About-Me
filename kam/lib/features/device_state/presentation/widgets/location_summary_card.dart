@@ -123,10 +123,21 @@ class _LocationDetails extends ConsumerWidget {
               ],
             )
           : blocked
-          ? const Text(
-              'Location permission is blocked by the operating system. It will '
-              'not be requested again; enable it in system settings to use '
-              'distance from home.',
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Location permission is blocked. Enable approximate or '
+                  'precise location for Know About Me in Android app settings '
+                  'to use distance from home.',
+                ),
+                TextButton(
+                  onPressed: () => ref
+                      .read(locationStateCollectorProvider)
+                      .openAppSettings(),
+                  child: const Text('Open app settings'),
+                ),
+              ],
             )
           : null,
     );

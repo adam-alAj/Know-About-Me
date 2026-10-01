@@ -14,6 +14,9 @@ abstract interface class LocationPlatformGateway {
   /// Asks the OS for permission. Only called from an explicit user action.
   Future<Object?> requestPermission();
 
+  /// Opens this app's Android settings page after a permanent denial.
+  Future<void> openAppSettings();
+
   /// Requests one location fix.
   Future<Object?> readCurrentLocation();
 
