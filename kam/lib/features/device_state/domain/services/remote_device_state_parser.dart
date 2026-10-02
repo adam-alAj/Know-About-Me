@@ -148,6 +148,7 @@ class RemoteDeviceStateParser {
       chargingStartedAt: chargingStartedAt,
       receivedAt: document.receivedAt,
       isFromCache: document.isFromCache,
+      hasPendingWrites: document.hasPendingWrites,
     );
   }
 
@@ -236,7 +237,8 @@ class RemoteDeviceStateParser {
       ? value.toInt()
       : null;
 
-  static double? _double(Object? value) => value is num ? value.toDouble() : null;
+  static double? _double(Object? value) =>
+      value is num ? value.toDouble() : null;
 
   static String? _string(Object? value) =>
       value is String && value.isNotEmpty ? value : null;

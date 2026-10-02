@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../../../../core/logging/app_logger.dart';
 import '../../domain/models/remote_device_state.dart';
 import '../../domain/models/sync_payload.dart';
 import '../../domain/repositories/partner_device_state_repository.dart';
@@ -31,10 +32,68 @@ class FirestorePartnerDeviceStateRepository
   FirestorePartnerDeviceStateRepository(
     this._gateway, {
     this.parser = const RemoteDeviceStateParser(),
+    this.logger = const NoopAppLogger(),
   });
 
   final DeviceStateSyncGateway _gateway;
   final RemoteDeviceStateParser parser;
+  final AppLogger logger;
+  final Map<String, int> _latestServerVersions = <String, int>{};
+
+  @override
+  Future<PartnerDeviceState?> readFromServer({
+    required String pairId,
+    required String partnerUserId,
+    bool watchDeviceState = true,
+    bool watchLocation = true,
+  }) async {
+    if (!watchDeviceState && !watchLocation) return null;
+    final now = DateTime.now().toUtc();
+    final documents = await Future.wait<RemoteStateDocument>([
+      watchDeviceState
+          ? _gateway.readFromServer(
+              pairId: pairId,
+              ownerId: partnerUserId,
+              kind: SyncDocumentKind.deviceState,
+            )
+          : Future<RemoteStateDocument>.value(
+              RemoteStateDocument.absent(receivedAt: now),
+            ),
+      watchLocation
+          ? _gateway.readFromServer(
+              pairId: pairId,
+              ownerId: partnerUserId,
+              kind: SyncDocumentKind.location,
+            )
+          : Future<RemoteStateDocument>.value(
+              RemoteStateDocument.absent(receivedAt: now),
+            ),
+    ]);
+    final merged = _mergeDocuments(
+      pairId: pairId,
+      partnerUserId: partnerUserId,
+      stateDocument: watchDeviceState ? documents[0] : null,
+      locationDocument: watchLocation ? documents[1] : null,
+      parser: parser,
+    );
+    final state = merged;
+    final version = state?.stateVersion;
+    final key = '$pairId/$partnerUserId';
+    final previous = _latestServerVersions[key];
+    if (version != null && previous != null && version < previous) {
+      logger.warning(
+        'STALE_STATE_REJECTED',
+        context: {
+          'incomingVersion': version,
+          'currentVersion': previous,
+          'source': 'server_read',
+        },
+      );
+      throw StateVersionRegressionException();
+    }
+    if (version != null) _latestServerVersions[key] = version;
+    return state == null ? null : PartnerDeviceState(state);
+  }
 
   @override
   Stream<PartnerDeviceState?> watch({
@@ -48,6 +107,7 @@ class FirestorePartnerDeviceStateRepository
 
     RemoteStateDocument? deviceStateDocument;
     RemoteStateDocument? locationDocument;
+    final versionKey = '$pairId/$partnerUserId';
     // A document we deliberately do not watch is already settled: it is
     // unavailable, not still pending.
     var deviceStateReady = !watchDeviceState;
@@ -61,48 +121,44 @@ class FirestorePartnerDeviceStateRepository
       final stateDocument = deviceStateDocument;
       final locationDocumentSnapshot = locationDocument;
 
-      final parsedState = stateDocument == null
-          ? null
-          : parser.parseDeviceState(
-              pairId: pairId,
-              expectedOwnerUserId: partnerUserId,
-              document: stateDocument,
-            );
-      final parsedLocation = locationDocumentSnapshot == null
-          ? RemoteLocationState.unavailable
-          : parser.parseLocation(
-              expectedOwnerUserId: partnerUserId,
-              document: locationDocumentSnapshot,
-            );
-
-      final RemoteDeviceState? merged;
-      if (parsedState != null) {
-        merged = parsedState.withLocation(
-          parsedLocation,
-          isFromCache:
-              (stateDocument?.isFromCache ?? false) ||
-              (locationDocumentSnapshot?.isFromCache ?? false),
+      final merged = _mergeDocuments(
+        pairId: pairId,
+        partnerUserId: partnerUserId,
+        stateDocument: stateDocument,
+        locationDocument: locationDocumentSnapshot,
+        parser: parser,
+      );
+      final version = merged?.stateVersion;
+      final highest = _latestServerVersions[versionKey];
+      if (version != null && highest != null && version < highest) {
+        logger.warning(
+          'STALE_STATE_REJECTED',
+          context: {
+            'incomingVersion': version,
+            'currentVersion': highest,
+            'source': merged!.isFromCache ? 'cache' : 'server',
+          },
         );
-      } else if (parsedLocation.hasCoordinates) {
-        // The state document is absent or unreadable, but the partner did
-        // publish a location. A location-only view is still truthful: it reports
-        // only the facts that exist and leaves every other metric unavailable.
-        merged = RemoteDeviceState.locationOnly(
-          pairId: pairId,
-          ownerUserId: partnerUserId,
-          location: parsedLocation,
-          schemaVersion: 1,
-          receivedAt: locationDocumentSnapshot!.receivedAt,
-          isFromCache: locationDocumentSnapshot.isFromCache,
-          deviceId: _string(locationDocumentSnapshot.data['deviceId']),
-          stateVersion: _int(locationDocumentSnapshot.data['stateVersion']),
-        );
-      } else {
-        // Nothing recognizable has ever been published. Emitting an empty state
-        // would be inventing one.
-        merged = null;
+        return;
       }
-
+      if (version != null && merged != null && !merged.isFromCache) {
+        _latestServerVersions[versionKey] = version;
+      }
+      logger.debug(
+        'REMOTE_STATE_PARSED',
+        context: {
+          'stateVersion': version,
+          'isFromCache':
+              merged?.isFromCache ??
+              ((stateDocument?.isFromCache ?? false) ||
+                  (locationDocumentSnapshot?.isFromCache ?? false)),
+          'hasPendingWrites':
+              merged?.hasPendingWrites ??
+              ((stateDocument?.hasPendingWrites ?? false) ||
+                  (locationDocumentSnapshot?.hasPendingWrites ?? false)),
+          'hasState': merged != null,
+        },
+      );
       controller.add(merged == null ? null : PartnerDeviceState(merged));
     }
 
@@ -119,14 +175,11 @@ class FirestorePartnerDeviceStateRepository
               ownerId: partnerUserId,
               kind: SyncDocumentKind.deviceState,
             )
-            .listen(
-              (document) {
-                deviceStateDocument = document;
-                deviceStateReady = true;
-                maybeEmit();
-              },
-              onError: controller.addError,
-            ),
+            .listen((document) {
+              deviceStateDocument = document;
+              deviceStateReady = true;
+              maybeEmit();
+            }, onError: controller.addError),
       );
     }
 
@@ -138,14 +191,11 @@ class FirestorePartnerDeviceStateRepository
               ownerId: partnerUserId,
               kind: SyncDocumentKind.location,
             )
-            .listen(
-              (document) {
-                locationDocument = document;
-                locationReady = true;
-                maybeEmit();
-              },
-              onError: controller.addError,
-            ),
+            .listen((document) {
+              locationDocument = document;
+              locationReady = true;
+              maybeEmit();
+            }, onError: controller.addError),
       );
     }
 
@@ -172,4 +222,61 @@ class FirestorePartnerDeviceStateRepository
       : value is num
       ? value.toInt()
       : null;
+
+  static RemoteDeviceState? _mergeDocuments({
+    required String pairId,
+    required String partnerUserId,
+    required RemoteStateDocument? stateDocument,
+    required RemoteStateDocument? locationDocument,
+    required RemoteDeviceStateParser parser,
+  }) {
+    final parsedState = stateDocument == null
+        ? null
+        : parser.parseDeviceState(
+            pairId: pairId,
+            expectedOwnerUserId: partnerUserId,
+            document: stateDocument,
+          );
+    final parsedLocation = locationDocument == null
+        ? RemoteLocationState.unavailable
+        : parser.parseLocation(
+            expectedOwnerUserId: partnerUserId,
+            document: locationDocument,
+          );
+    final cached =
+        (stateDocument?.isFromCache ?? false) ||
+        (locationDocument?.isFromCache ?? false);
+    final pending =
+        (stateDocument?.hasPendingWrites ?? false) ||
+        (locationDocument?.hasPendingWrites ?? false);
+
+    if (parsedState != null) {
+      return parsedState.withLocation(
+        parsedLocation,
+        isFromCache: cached,
+        hasPendingWrites: pending,
+      );
+    }
+    if (parsedLocation.hasCoordinates && locationDocument != null) {
+      return RemoteDeviceState.locationOnly(
+        pairId: pairId,
+        ownerUserId: partnerUserId,
+        location: parsedLocation,
+        schemaVersion: 1,
+        receivedAt: locationDocument.receivedAt,
+        isFromCache: cached,
+        hasPendingWrites: pending,
+        deviceId: _string(locationDocument.data['deviceId']),
+        stateVersion: _int(locationDocument.data['stateVersion']),
+      );
+    }
+    return null;
+  }
+}
+
+/// The server returned a state older than one already confirmed in this
+/// repository session. Callers should keep the newer value and report refresh
+/// failure rather than interpreting the regression as deletion.
+class StateVersionRegressionException implements Exception {
+  const StateVersionRegressionException();
 }

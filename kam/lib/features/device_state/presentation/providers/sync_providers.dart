@@ -33,6 +33,7 @@ final deviceStateSyncGatewayProvider = Provider<DeviceStateSyncGateway?>((ref) {
   return FirestoreDeviceStateSyncGateway(
     ref.watch(firebaseFirestoreProvider),
     now: () => ref.read(clockProvider).nowUtc(),
+    logger: ref.watch(loggerProvider),
   );
 });
 
@@ -46,6 +47,7 @@ final deviceStateSyncServiceProvider = Provider<DeviceStateSyncService?>((ref) {
       now: () => ref.read(clockProvider).nowUtc(),
     ),
     versionCounter: SharedPreferencesSyncVersionStore(),
+    logger: ref.watch(loggerProvider),
   );
   ref.onDispose(service.dispose);
   return service;
@@ -89,7 +91,10 @@ final partnerDeviceStateRepositoryProvider =
       if (!ref.watch(firebaseAvailableProvider)) return null;
       final gateway = ref.watch(deviceStateSyncGatewayProvider);
       if (gateway == null) return null;
-      return FirestorePartnerDeviceStateRepository(gateway);
+      return FirestorePartnerDeviceStateRepository(
+        gateway,
+        logger: ref.watch(loggerProvider),
+      );
     });
 
 /// The partner's current synchronized state, or `null` when there is nothing to
@@ -135,79 +140,89 @@ final authorizedPartnerDeviceStateProvider =
     Provider<AsyncValue<PartnerDeviceState?>>((ref) {
       final state = ref.watch(partnerDeviceStateProvider);
       final sharing = ref.watch(partnerSharingProvider);
-      final access = sharing.asData?.value;
-      if (access == null || access.paused || !access.sharesAnything) {
-        return const AsyncData<PartnerDeviceState?>(null);
-      }
-      return state.whenData((partner) {
-        if (partner == null) return null;
-        final original = partner.state;
-        final observations = <DeviceMetric, StateObservation<Object?>>{};
-        for (final entry in original.observations.entries) {
-          final category = switch (entry.key) {
-            DeviceMetric.batteryPercentage => SharingCategory.battery,
-            DeviceMetric.chargingState ||
-            DeviceMetric.chargingDuration ||
-            DeviceMetric.chargingSource => SharingCategory.charging,
-            DeviceMetric.networkStatus => SharingCategory.network,
-            DeviceMetric.screenState ||
-            DeviceMetric.activityState ||
-            DeviceMetric.lastActivity => SharingCategory.activityIndicators,
-            DeviceMetric.deviceAvailability => null,
-            _ => null,
-          };
-          if ((category != null && access.shares(category)) ||
-              (entry.key == DeviceMetric.deviceAvailability &&
-                  (access.shares(SharingCategory.battery) ||
-                      access.shares(SharingCategory.charging) ||
-                      access.shares(SharingCategory.network) ||
-                      access.shares(SharingCategory.activityIndicators)))) {
-            observations[entry.key] = entry.value;
-          }
-        }
-        final includeLocation = access.shares(SharingCategory.location);
-        final location = original.location;
-        final filteredLocation = !includeLocation || location == null
-            ? null
-            : RemoteLocationState(
-                availability: location.availability,
-                latitude: location.latitude,
-                longitude: location.longitude,
-                accuracyMeters: location.accuracyMeters,
-                approximate: location.approximate,
-                distanceFromHomeKm:
-                    access.shares(SharingCategory.distanceFromHome)
-                    ? location.distanceFromHomeKm
-                    : null,
-                presence: access.shares(SharingCategory.distanceFromHome)
-                    ? location.presence
-                    : null,
-                observedAt: location.observedAt,
-              );
-        return PartnerDeviceState(
-          RemoteDeviceState(
-            pairId: original.pairId,
-            ownerUserId: original.ownerUserId,
-            observations: observations,
-            schemaVersion: original.schemaVersion,
-            receivedAt: original.receivedAt,
-            isFromCache: original.isFromCache,
-            deviceId: original.deviceId,
-            stateVersion: original.stateVersion,
-            observedAt: original.observedAt,
-            synchronizedAt: original.synchronizedAt,
-            lastOnlineAt: original.lastOnlineAt,
-            lastActivityAt: access.shares(SharingCategory.activityIndicators)
-                ? original.lastActivityAt
-                : null,
-            chargingStartedAt: access.shares(SharingCategory.charging)
-                ? original.chargingStartedAt
-                : null,
-            location: filteredLocation,
-          ),
-        );
-      });
+      return state.whenData(
+        (partner) => filterPartnerDeviceState(partner, sharing.asData?.value),
+      );
     });
+
+/// Applies the same category projection to both listener snapshots and
+/// explicit server refreshes. Firestore Rules remain the authoritative gate.
+PartnerDeviceState? filterPartnerDeviceState(
+  PartnerDeviceState? partner,
+  PairSharingState? access,
+) {
+  if (partner == null ||
+      access == null ||
+      access.paused ||
+      !access.sharesAnything) {
+    return null;
+  }
+  final original = partner.state;
+  final observations = <DeviceMetric, StateObservation<Object?>>{};
+  for (final entry in original.observations.entries) {
+    final category = switch (entry.key) {
+      DeviceMetric.batteryPercentage => SharingCategory.battery,
+      DeviceMetric.chargingState ||
+      DeviceMetric.chargingDuration ||
+      DeviceMetric.chargingSource => SharingCategory.charging,
+      DeviceMetric.networkStatus => SharingCategory.network,
+      DeviceMetric.screenState ||
+      DeviceMetric.activityState ||
+      DeviceMetric.lastActivity => SharingCategory.activityIndicators,
+      DeviceMetric.deviceAvailability => null,
+      _ => null,
+    };
+    if ((category != null && access.shares(category)) ||
+        (entry.key == DeviceMetric.deviceAvailability &&
+            (access.shares(SharingCategory.battery) ||
+                access.shares(SharingCategory.charging) ||
+                access.shares(SharingCategory.network) ||
+                access.shares(SharingCategory.activityIndicators)))) {
+      observations[entry.key] = entry.value;
+    }
+  }
+  final location = original.location;
+  final filteredLocation =
+      !access.shares(SharingCategory.location) || location == null
+      ? null
+      : RemoteLocationState(
+          availability: location.availability,
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracyMeters: location.accuracyMeters,
+          approximate: location.approximate,
+          distanceFromHomeKm: access.shares(SharingCategory.distanceFromHome)
+              ? location.distanceFromHomeKm
+              : null,
+          presence: access.shares(SharingCategory.distanceFromHome)
+              ? location.presence
+              : null,
+          observedAt: location.observedAt,
+        );
+  return PartnerDeviceState(
+    RemoteDeviceState(
+      pairId: original.pairId,
+      ownerUserId: original.ownerUserId,
+      observations: observations,
+      schemaVersion: original.schemaVersion,
+      receivedAt: original.receivedAt,
+      isFromCache: original.isFromCache,
+      hasPendingWrites: original.hasPendingWrites,
+      deviceId: original.deviceId,
+      stateVersion: original.stateVersion,
+      observedAt: original.observedAt,
+      synchronizedAt: original.synchronizedAt,
+      lastOnlineAt: original.lastOnlineAt,
+      lastActivityAt: access.shares(SharingCategory.activityIndicators)
+          ? original.lastActivityAt
+          : null,
+      chargingStartedAt: access.shares(SharingCategory.charging)
+          ? original.chargingStartedAt
+          : null,
+      location: filteredLocation,
+    ),
+  );
+}
 
 /// The outcome of each completed synchronization run.
 final deviceStateSyncResultsProvider = StreamProvider<List<SyncOutcome>>((ref) {

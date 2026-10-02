@@ -111,34 +111,37 @@ void main() {
     expect(cachedOnly.isConfirmed, isFalse);
   });
 
-  test('a screen transition publishes at once, not on the coalescing timer', () async {
-    final scheduler = _ManualScheduler();
-    final gateway = _RecordingGateway();
-    final coordinator = _coordinator(gateway: gateway, scheduler: scheduler);
-    await coordinator.updateScope(scope);
-    coordinator.updateSharing(
-      const PairSharingState(
-        paused: false,
-        categories: {SharingCategory.activityIndicators},
-      ),
-    );
+  test(
+    'a screen transition publishes at once, not on the coalescing timer',
+    () async {
+      final scheduler = _ManualScheduler();
+      final gateway = _RecordingGateway();
+      final coordinator = _coordinator(gateway: gateway, scheduler: scheduler);
+      await coordinator.updateScope(scope);
+      coordinator.updateSharing(
+        const PairSharingState(
+          paused: false,
+          categories: {SharingCategory.activityIndicators},
+        ),
+      );
 
-    // Establish the "on" state through the normal coalesced path.
-    coordinator.onLocalSnapshot(_snapshotWithScreen(DeviceScreenState.on));
-    scheduler.fire();
-    await pumpEventQueue();
-    final writesAfterFirstChange = gateway.writes.length;
+      // Establish the "on" state through the normal coalesced path.
+      coordinator.onLocalSnapshot(_snapshotWithScreen(DeviceScreenState.on));
+      scheduler.fire();
+      await pumpEventQueue();
+      final writesAfterFirstChange = gateway.writes.length;
 
-    // The screen turns off. This must go out immediately: the coalescing timer
-    // does not run once the process is suspended, which is exactly why the
-    // partner kept seeing "on".
-    coordinator.onLocalSnapshot(_snapshotWithScreen(DeviceScreenState.off));
-    await pumpEventQueue();
+      // The screen turns off. This must go out immediately: the coalescing timer
+      // does not run once the process is suspended, which is exactly why the
+      // partner kept seeing "on".
+      coordinator.onLocalSnapshot(_snapshotWithScreen(DeviceScreenState.off));
+      await pumpEventQueue();
 
-    expect(scheduler.hasPending, isFalse);
-    expect(gateway.writes.length, greaterThan(writesAfterFirstChange));
-    expect(gateway.writes.last.payload.fields['screenState'], 'off');
-  });
+      expect(scheduler.hasPending, isFalse);
+      expect(gateway.writes.length, greaterThan(writesAfterFirstChange));
+      expect(gateway.writes.last.payload.fields['screenState'], 'off');
+    },
+  );
 
   test(
     'manual reconciliation publishes and retains the freshly read snapshot',
@@ -154,9 +157,7 @@ void main() {
         ),
       );
 
-      await coordinator.reconcileNow(
-        _snapshotWithScreen(DeviceScreenState.on),
-      );
+      await coordinator.reconcileNow(_snapshotWithScreen(DeviceScreenState.on));
       await coordinator.reconcileNow(
         _snapshotWithScreen(DeviceScreenState.off),
       );
@@ -316,6 +317,13 @@ class _RecordingGateway implements DeviceStateSyncGateway {
     required String ownerId,
     required SyncDocumentKind kind,
   }) => const Stream<RemoteStateDocument>.empty();
+
+  @override
+  Future<RemoteStateDocument> readFromServer({
+    required String pairId,
+    required String ownerId,
+    required SyncDocumentKind kind,
+  }) async => RemoteStateDocument.absent(receivedAt: DateTime.utc(2026));
 }
 
 class _MemoryVersionStore implements SyncVersionStore {

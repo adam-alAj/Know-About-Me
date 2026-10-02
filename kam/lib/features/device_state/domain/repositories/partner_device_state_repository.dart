@@ -7,6 +7,15 @@ import '../models/remote_device_state.dart';
 /// merged into local state, and [PartnerDeviceState] cannot be passed where a
 /// local snapshot is expected (Phase 11 §5).
 abstract interface class PartnerDeviceStateRepository {
+  /// Reads the authorized documents directly from Firestore's server. A null
+  /// result means the server confirmed that no usable state exists.
+  Future<PartnerDeviceState?> readFromServer({
+    required String pairId,
+    required String partnerUserId,
+    bool watchDeviceState = true,
+    bool watchLocation = true,
+  });
+
   /// Watches the partner's state for one active pair.
   ///
   /// Emits `null` after the watched initial documents are confirmed absent,

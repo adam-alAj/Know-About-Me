@@ -17,8 +17,7 @@ class SyncWriteResult {
   const SyncWriteResult.deleted()
     : status = SyncWriteStatus.deleted,
       reason = null;
-  const SyncWriteResult.failed(this.reason)
-    : status = SyncWriteStatus.failed;
+  const SyncWriteResult.failed(this.reason) : status = SyncWriteStatus.failed;
 
   final SyncWriteStatus status;
   final String? reason;
@@ -55,6 +54,14 @@ abstract interface class DeviceStateSyncGateway {
   /// [RemoteStateDocument.isFromCache] so cached data is never mistaken for
   /// current state (Phase 11 §31).
   Stream<RemoteStateDocument> watch({
+    required String pairId,
+    required String ownerId,
+    required SyncDocumentKind kind,
+  });
+
+  /// Reads directly from the Firestore server. Unlike [watch], this does not
+  /// fall back to cached data when the server cannot be reached.
+  Future<RemoteStateDocument> readFromServer({
     required String pairId,
     required String ownerId,
     required SyncDocumentKind kind,

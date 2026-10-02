@@ -383,6 +383,13 @@ class _RecordingGateway implements DeviceStateSyncGateway {
     required String ownerId,
     required SyncDocumentKind kind,
   }) => const Stream<RemoteStateDocument>.empty();
+
+  @override
+  Future<RemoteStateDocument> readFromServer({
+    required String pairId,
+    required String ownerId,
+    required SyncDocumentKind kind,
+  }) async => RemoteStateDocument.absent(receivedAt: DateTime.utc(2026));
 }
 
 class _MemoryVersionStore implements SyncVersionStore {

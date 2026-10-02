@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../../../core/logging/app_logger.dart';
+
 import '../../domain/models/remote_device_state.dart';
 import '../../domain/models/sync_payload.dart';
 import '../../domain/sources/device_state_sync_gateway.dart';
@@ -12,12 +14,17 @@ import '../../domain/sources/device_state_sync_gateway.dart';
 /// as `permission-denied`. There is no privileged server in this project
 /// (ADR-009), so this client can only ever write its own document.
 class FirestoreDeviceStateSyncGateway implements DeviceStateSyncGateway {
-  FirestoreDeviceStateSyncGateway(this._db, {required this.now});
+  FirestoreDeviceStateSyncGateway(
+    this._db, {
+    required this.now,
+    this.logger = const NoopAppLogger(),
+  });
 
   final FirebaseFirestore _db;
 
   /// Injected clock, used to stamp when a document was received locally.
   final DateTime Function() now;
+  final AppLogger logger;
 
   static const String _deviceStateCollection = 'deviceState';
   static const String _locationCollection = 'location';
@@ -38,14 +45,46 @@ class FirestoreDeviceStateSyncGateway implements DeviceStateSyncGateway {
         return const SyncWriteResult.published();
       }
       try {
+        logger.info(
+          'FIRESTORE_WRITE_STARTED',
+          context: {
+            'operation': 'delete',
+            'documentKind': payload.kind.name,
+            'stateVersion': payload.fields['stateVersion'],
+          },
+        );
         await reference.delete();
+        logger.info(
+          'FIRESTORE_WRITE_SUCCESS',
+          context: {
+            'operation': 'delete',
+            'documentKind': payload.kind.name,
+            'stateVersion': payload.fields['stateVersion'],
+          },
+        );
         return const SyncWriteResult.deleted();
       } on FirebaseException catch (error) {
+        logger.warning(
+          'FIRESTORE_WRITE_FAILED',
+          context: {
+            'operation': 'delete',
+            'documentKind': payload.kind.name,
+            'errorCode': error.code,
+          },
+        );
         return SyncWriteResult.failed(_safeCode(error));
       }
     }
 
     try {
+      logger.info(
+        'FIRESTORE_WRITE_STARTED',
+        context: {
+          'operation': 'set',
+          'documentKind': payload.kind.name,
+          'stateVersion': payload.fields['stateVersion'],
+        },
+      );
       final data = <String, Object?>{
         for (final entry in payload.fields.entries)
           entry.key: _toFirestoreValue(entry.value),
@@ -61,8 +100,24 @@ class FirestoreDeviceStateSyncGateway implements DeviceStateSyncGateway {
       data['updatedAt'] = FieldValue.serverTimestamp();
 
       await reference.set(data, SetOptions(merge: true));
+      logger.info(
+        'FIRESTORE_WRITE_SUCCESS',
+        context: {
+          'operation': 'set',
+          'documentKind': payload.kind.name,
+          'stateVersion': payload.fields['stateVersion'],
+        },
+      );
       return const SyncWriteResult.published();
     } on FirebaseException catch (error) {
+      logger.warning(
+        'FIRESTORE_WRITE_FAILED',
+        context: {
+          'operation': 'set',
+          'documentKind': payload.kind.name,
+          'errorCode': error.code,
+        },
+      );
       return SyncWriteResult.failed(_safeCode(error));
     }
   }
@@ -79,18 +134,61 @@ class FirestoreDeviceStateSyncGateway implements DeviceStateSyncGateway {
     // `isFromCache` would stay `true` for the whole session. That is exactly
     // what made a fully-online device keep reporting “Offline — showing last
     // known data” (Phase 20 §9, §23).
+    logger.debug(
+      'FIRESTORE_LISTENER_ATTACHED',
+      context: {'documentKind': kind.name},
+    );
     return _document(pairId, ownerId, kind)
         .snapshots(includeMetadataChanges: true)
         .map((snapshot) {
-      final data = snapshot.data();
-      return RemoteStateDocument(
-        data: data == null
-            ? const <String, Object?>{}
-            : _toDartMap(data),
-        receivedAt: now().toUtc(),
-        isFromCache: snapshot.metadata.isFromCache,
-      );
-    });
+          final data = snapshot.data();
+          logger.debug(
+            snapshot.metadata.isFromCache
+                ? 'FIRESTORE_SNAPSHOT_FROM_CACHE'
+                : 'FIRESTORE_SNAPSHOT_FROM_SERVER',
+            context: {
+              'documentKind': kind.name,
+              'hasPendingWrites': snapshot.metadata.hasPendingWrites,
+              'exists': snapshot.exists,
+            },
+          );
+          return RemoteStateDocument(
+            data: data == null ? const <String, Object?>{} : _toDartMap(data),
+            receivedAt: now().toUtc(),
+            isFromCache: snapshot.metadata.isFromCache,
+            hasPendingWrites: snapshot.metadata.hasPendingWrites,
+          );
+        })
+        .handleError((Object error, StackTrace stackTrace) {
+          logger.warning(
+            'FIRESTORE_LISTENER_ERROR',
+            context: {
+              'documentKind': kind.name,
+              'errorType': error.runtimeType.toString(),
+            },
+          );
+          Error.throwWithStackTrace(error, stackTrace);
+        });
+  }
+
+  @override
+  Future<RemoteStateDocument> readFromServer({
+    required String pairId,
+    required String ownerId,
+    required SyncDocumentKind kind,
+  }) async {
+    final snapshot = await _document(
+      pairId,
+      ownerId,
+      kind,
+    ).get(const GetOptions(source: Source.server));
+    final data = snapshot.data();
+    return RemoteStateDocument(
+      data: data == null ? const <String, Object?>{} : _toDartMap(data),
+      receivedAt: now().toUtc(),
+      isFromCache: snapshot.metadata.isFromCache,
+      hasPendingWrites: snapshot.metadata.hasPendingWrites,
+    );
   }
 
   DocumentReference<Map<String, dynamic>> _document(

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../../../../core/logging/app_logger.dart';
 import '../../../privacy/domain/models/sharing_category.dart';
 import '../models/device_state_snapshot.dart';
 import '../models/sync_payload.dart';
@@ -126,6 +127,7 @@ class DeviceStateSyncService {
     required SyncVersionStore versionCounter,
     SyncChangeTracker? changeTracker,
     SyncScheduler? scheduler,
+    this.logger = const NoopAppLogger(),
     this.coalesceWindow = const Duration(seconds: 3),
   }) : _gateway = syncGateway,
        _sanitizer = stateSanitizer,
@@ -138,6 +140,7 @@ class DeviceStateSyncService {
   final SyncVersionStore _versionStore;
   final SyncChangeTracker _changeTracker;
   final SyncScheduler _scheduler;
+  final AppLogger logger;
 
   /// How long bursts of local change are coalesced before a write is attempted.
   final Duration coalesceWindow;
@@ -275,6 +278,10 @@ class DeviceStateSyncService {
   /// with the latest state, so nothing is lost and nothing is written twice.
   void requestPublish(SyncRequest request) {
     if (_disposed) return;
+    logger.debug(
+      'SYNC_TRIGGERED',
+      context: {'stateVersion': currentVersion, 'trigger': 'local_change'},
+    );
     _latest = request;
     _scheduler.schedule(coalesceWindow, _drain);
   }
@@ -386,9 +393,29 @@ class DeviceStateSyncService {
       if (result.isFailure) {
         // The change is deliberately not recorded: a later attempt republishes
         // the latest state instead of replaying a queue (Phase 11 §17, §19).
-        return _failureOutcome(payload.kind, result.reason ?? 'write_failed');
+        final outcome = _failureOutcome(
+          payload.kind,
+          result.reason ?? 'write_failed',
+        );
+        logger.warning(
+          'SYNC_WRITE_OUTCOME',
+          context: {
+            'documentKind': payload.kind.name,
+            'outcome': outcome.decision.name,
+            'errorCode': outcome.reason,
+            'stateVersion': payload.fields['stateVersion'],
+          },
+        );
+        return outcome;
       }
       _changeTracker.recordPublished(payload);
+      logger.debug(
+        'STATE_VERSION_ACCEPTED',
+        context: {
+          'documentKind': payload.kind.name,
+          'stateVersion': payload.fields['stateVersion'],
+        },
+      );
       return SyncOutcome(payload.kind, SyncDecision.published);
     } catch (error) {
       return _failureOutcome(payload.kind, error.runtimeType.toString());

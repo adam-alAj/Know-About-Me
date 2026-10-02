@@ -16,12 +16,14 @@ class RemoteStateDocument {
     required this.data,
     required this.receivedAt,
     required this.isFromCache,
+    this.hasPendingWrites = false,
   });
 
   /// A document that does not exist.
   const RemoteStateDocument.absent({
     required this.receivedAt,
     this.isFromCache = false,
+    this.hasPendingWrites = false,
   }) : data = const <String, Object?>{};
 
   /// Raw field values, already converted to plain Dart types.
@@ -39,6 +41,9 @@ class RemoteStateDocument {
   /// as proof that the partner device is currently reachable (Phase 11 §31,
   /// §32).
   final bool isFromCache;
+
+  /// Whether Firestore has yet to acknowledge local changes in this snapshot.
+  final bool hasPendingWrites;
 
   /// Whether the document carries any state at all. A deleted document (for
   /// example after the partner stopped sharing location) is not an empty state.
@@ -109,7 +114,9 @@ class RemoteLocationState {
 
   /// Freshness of the partner's fix at [now], using the location policy.
   DataFreshness freshnessAt(DateTime now) {
-    if (availability == CapabilityAvailability.stale) return DataFreshness.stale;
+    if (availability == CapabilityAvailability.stale) {
+      return DataFreshness.stale;
+    }
     final observed = observedAt;
     if (observed == null) return DataFreshness.unknown;
     return FreshnessPolicy.location.classifyAge(
@@ -137,6 +144,7 @@ class RemoteDeviceState {
     required this.schemaVersion,
     required this.receivedAt,
     required this.isFromCache,
+    this.hasPendingWrites = false,
     this.deviceId,
     this.stateVersion,
     this.observedAt,
@@ -194,6 +202,10 @@ class RemoteDeviceState {
   /// Whether Firestore served the value from cache (Phase 11 §31).
   final bool isFromCache;
 
+  /// Whether a component document contains local changes not yet acknowledged
+  /// by Firestore. Kept separate from cache provenance.
+  final bool hasPendingWrites;
+
   /// The partner's location, or why it is not available.
   final RemoteLocationState? location;
 
@@ -204,6 +216,7 @@ class RemoteDeviceState {
   RemoteDeviceState withLocation(
     RemoteLocationState? value, {
     bool? isFromCache,
+    bool? hasPendingWrites,
   }) => RemoteDeviceState(
     pairId: pairId,
     ownerUserId: ownerUserId,
@@ -220,6 +233,7 @@ class RemoteDeviceState {
     // The merged state is cache-served if either constituent document is.
     // Otherwise a fresh state document could hide a cached location snapshot.
     isFromCache: isFromCache ?? this.isFromCache,
+    hasPendingWrites: hasPendingWrites ?? this.hasPendingWrites,
     location: value,
   );
 
@@ -235,6 +249,7 @@ class RemoteDeviceState {
     required int schemaVersion,
     required DateTime receivedAt,
     required bool isFromCache,
+    bool hasPendingWrites = false,
     String? deviceId,
     int? stateVersion,
   }) => RemoteDeviceState(
@@ -244,6 +259,7 @@ class RemoteDeviceState {
     schemaVersion: schemaVersion,
     receivedAt: receivedAt,
     isFromCache: isFromCache,
+    hasPendingWrites: hasPendingWrites,
     deviceId: deviceId,
     stateVersion: stateVersion,
     observedAt: location.observedAt,

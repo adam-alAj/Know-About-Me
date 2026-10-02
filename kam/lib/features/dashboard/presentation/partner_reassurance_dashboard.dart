@@ -9,6 +9,7 @@ import '../../../app/router/app_routes.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/domain/device_metric.dart';
 import '../../../core/freshness/data_freshness.dart';
+import '../../../core/logging/app_logger.dart';
 import '../../../core/ui/widgets/app_button.dart';
 import '../../../core/ui/widgets/app_card.dart';
 import '../../../core/ui/widgets/app_inline_message.dart';
@@ -58,6 +59,10 @@ class _PartnerReassuranceDashboardState
     extends ConsumerState<PartnerReassuranceDashboard> {
   Timer? _displayTimer;
   late DateTime _now;
+  RemoteDeviceState? _serverRefreshState;
+  String? _serverRefreshPairId;
+  String? _serverRefreshPartnerId;
+  bool _serverRefreshCompleted = false;
 
   @override
   void initState() {
@@ -84,8 +89,44 @@ class _PartnerReassuranceDashboardState
     final scope = scopeAsync.value;
     final now = _now;
     final titleName = ref.watch(partnerDisplayNameProvider).value;
-    final partnerState = ref.watch(authorizedPartnerDeviceStateProvider);
+    final livePartnerState = ref.watch(authorizedPartnerDeviceStateProvider);
     final partnerSharing = ref.watch(partnerSharingProvider);
+
+    ref.listen(partnerDeviceStateProvider, (_, next) {
+      final incoming = next.value?.state;
+      if (!_serverRefreshCompleted ||
+          incoming == null ||
+          incoming.isFromCache ||
+          incoming.hasPendingWrites ||
+          incoming.pairId != _serverRefreshPairId ||
+          incoming.ownerUserId != _serverRefreshPartnerId) {
+        return;
+      }
+      final currentVersion = _serverRefreshState?.stateVersion;
+      final incomingVersion = incoming.stateVersion;
+      if (currentVersion == null ||
+          incomingVersion == null ||
+          incomingVersion >= currentVersion) {
+        setState(() => _serverRefreshCompleted = false);
+      }
+    });
+
+    final manualRefreshApplies =
+        _serverRefreshCompleted &&
+        scope != null &&
+        scope.pairId == _serverRefreshPairId &&
+        scope.partnerUserId == _serverRefreshPartnerId;
+    final manualState = manualRefreshApplies
+        ? filterPartnerDeviceState(
+            _serverRefreshState == null
+                ? null
+                : PartnerDeviceState(_serverRefreshState!),
+            partnerSharing.value,
+          )
+        : null;
+    final partnerState = manualRefreshApplies
+        ? AsyncData<PartnerDeviceState?>(manualState)
+        : livePartnerState;
 
     final membership = _membershipFor(memberships.value, scope);
     final hasActiveScope = scope != null && membership?.isActive == true;
@@ -100,26 +141,7 @@ class _PartnerReassuranceDashboardState
         ),
       ],
       body: RefreshIndicator(
-        onRefresh: () async {
-          // A manual refresh re-reads the actual sources; a widget rebuild is
-          // not a data refresh (Phase 20 §21).
-          //   1. Re-collect this device's own capabilities from the platform.
-          //   2. Re-derive the connection from the latest evidence.
-          //   3. Give an unfinished publish another (coalesced) trigger.
-          //   4. Re-subscribe the authorized partner streams. Invalidating a
-          //      provider cancels its old listener and creates exactly one new
-          //      one, so no duplicate Firestore listener is left behind.
-          final localSnapshot = await ref
-              .read(deviceMonitoringControllerProvider)
-              .collectNow();
-          ref.read(connectionStatusProvider.notifier).refresh();
-          await ref
-              .read(deviceStateSyncCoordinatorProvider)
-              ?.reconcileNow(localSnapshot);
-          ref.invalidate(partnerSharingProvider);
-          ref.invalidate(partnerDeviceStateProvider);
-          ref.invalidate(partnerDisplayNameProvider);
-        },
+        onRefresh: _refreshPartnerState,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.only(bottom: AppSpacing.xl),
@@ -175,6 +197,141 @@ class _PartnerReassuranceDashboardState
         ),
       ),
     );
+  }
+
+  Future<void> _refreshPartnerState() async {
+    final logger = ref.read(loggerProvider);
+    logger.info('REFRESH_STARTED');
+    var result = 'error';
+    var message = 'Could not refresh. Try again.';
+    try {
+      final scope = ref.read(partnerScopeProvider).value;
+      final sharing = ref.read(partnerSharingProvider).value;
+      if (scope == null || sharing == null) {
+        message = 'Connection details are not available yet.';
+      } else if (!sharing.sharesAnyDeviceState &&
+          !sharing.shares(SharingCategory.location)) {
+        result = 'no_shared_state';
+        message = 'Your partner is not sharing device state.';
+      } else {
+        final previous = ref
+            .read(authorizedPartnerDeviceStateProvider)
+            .value
+            ?.state;
+        final localSnapshot = await ref
+            .read(deviceMonitoringControllerProvider)
+            .collectNow()
+            .timeout(const Duration(seconds: 15));
+        final outcomes =
+            await ref
+                .read(deviceStateSyncCoordinatorProvider)
+                ?.reconcileNow(localSnapshot)
+                .timeout(const Duration(seconds: 10)) ??
+            const [];
+        final failedWrite = outcomes.any((outcome) => outcome.isFailure);
+        final repository = ref.read(partnerDeviceStateRepositoryProvider);
+        if (repository == null) {
+          result = 'offline';
+          message = 'Server unavailable. Showing the last available state.';
+        } else {
+          logger.info(
+            'REFRESH_SERVER_REQUESTED',
+            context: {
+              'watchDeviceState': sharing.sharesAnyDeviceState,
+              'watchLocation': sharing.shares(SharingCategory.location),
+            },
+          );
+          final serverPartner = await repository
+              .readFromServer(
+                pairId: scope.pairId,
+                partnerUserId: scope.partnerUserId,
+                watchDeviceState: sharing.sharesAnyDeviceState,
+                watchLocation: sharing.shares(SharingCategory.location),
+              )
+              .timeout(const Duration(seconds: 10));
+          final serverState = serverPartner?.state;
+          if (serverState != null &&
+              (serverState.isFromCache || serverState.hasPendingWrites)) {
+            result = 'cachedStale';
+            message = 'Showing cached data; server confirmation is pending.';
+          } else {
+            if (!mounted) return;
+            setState(() {
+              _serverRefreshState = serverState;
+              _serverRefreshPairId = scope.pairId;
+              _serverRefreshPartnerId = scope.partnerUserId;
+              _serverRefreshCompleted = true;
+            });
+            ref.read(connectionStatusProvider.notifier).refresh();
+            if (failedWrite) {
+              result = 'error';
+              message =
+                  'Partner state confirmed; this phone could not publish its latest state.';
+            } else {
+              final changed = _remoteStateChanged(previous, serverState);
+              result = changed
+                  ? 'updatedFromServer'
+                  : 'noChangeServerConfirmed';
+              message = changed
+                  ? 'Updated from server just now.'
+                  : 'Server confirmed — no changes.';
+            }
+            logger.info(
+              'REFRESH_SERVER_CONFIRMED',
+              context: {
+                'stateVersion': serverState?.stateVersion,
+                'observedAt': serverState?.observedAt?.toIso8601String(),
+                'publishedAt': serverState?.synchronizedAt?.toIso8601String(),
+                'hasState': serverState != null,
+                'hasPendingWrites': serverState?.hasPendingWrites ?? false,
+              },
+            );
+          }
+        }
+      }
+    } on TimeoutException {
+      result = 'timeout';
+      message = 'Refresh timed out. Showing the last available state.';
+      logger.warning('REFRESH_TIMEOUT');
+    } catch (error) {
+      final current = ref
+          .read(authorizedPartnerDeviceStateProvider)
+          .value
+          ?.state;
+      final status = ref.read(connectionStatusProvider);
+      if (status.isOffline) {
+        result = current?.isFromCache == true ? 'cachedStale' : 'offline';
+        message = current?.isFromCache == true
+            ? 'Showing cached data — server unavailable.'
+            : 'Offline. No server state could be confirmed.';
+      } else if (current?.isFromCache == true) {
+        result = 'cachedStale';
+        message = 'Showing cached data — server unavailable.';
+      } else {
+        result = 'error';
+        message = 'Could not refresh. Try again.';
+      }
+      logger.warning(
+        'REFRESH_FAILED',
+        context: {'result': result, 'errorType': error.runtimeType.toString()},
+      );
+    }
+
+    if (!mounted) return;
+    logger.info('REFRESH_FINISHED', context: {'result': result});
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  static bool _remoteStateChanged(
+    RemoteDeviceState? previous,
+    RemoteDeviceState? current,
+  ) {
+    if (previous == null || current == null) return previous != current;
+    return previous.stateVersion != current.stateVersion ||
+        previous.observedAt != current.observedAt ||
+        previous.synchronizedAt != current.synchronizedAt;
   }
 
   static PairMembership? _membershipFor(
@@ -245,7 +402,8 @@ class _PartnerHeader extends StatelessWidget {
     final theme = Theme.of(context);
     final reach = _reachability(state);
     final observedAt = state?.observedAt;
-    final freshness = state?.observationFreshnessAt(now) ?? DataFreshness.unknown;
+    final freshness =
+        state?.observationFreshnessAt(now) ?? DataFreshness.unknown;
     final age = observedAt == null ? null : now.toUtc().difference(observedAt);
 
     return AppCard(
@@ -253,9 +411,7 @@ class _PartnerHeader extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
-            child: Text(name.isEmpty ? '?' : name.characters.first),
-          ),
+          CircleAvatar(child: Text(name.isEmpty ? '?' : name.characters.first)),
           const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Column(
@@ -278,9 +434,18 @@ class _PartnerHeader extends StatelessWidget {
                       tone: reach.tone,
                     ),
                     if (state != null)
-                      FreshnessIndicator(
-                        freshness: freshness,
-                        age: age,
+                      FreshnessIndicator(freshness: freshness, age: age),
+                    if (state?.isFromCache == true)
+                      const StatusPill(
+                        label: 'Cached snapshot',
+                        icon: Icons.cloud_off_outlined,
+                        tone: StatusTone.attention,
+                      ),
+                    if (state?.hasPendingWrites == true)
+                      const StatusPill(
+                        label: 'Server confirmation pending',
+                        icon: Icons.sync,
+                        tone: StatusTone.attention,
                       ),
                   ],
                 ),
@@ -464,10 +629,7 @@ class _PartnerSections extends StatelessWidget {
                 emphasis: StateRowEmphasis.strong,
               ),
             if (canShowCharging)
-              StateRow(
-                label: 'Charging',
-                value: _chargingLabel(charge),
-              ),
+              StateRow(label: 'Charging', value: _chargingLabel(charge)),
             if (canShowCharging && charging)
               StateRow(
                 label: 'Charging duration',
@@ -530,8 +692,7 @@ class _PartnerSections extends StatelessWidget {
             label: 'Categories',
             value: sharing.categories
                 .where(
-                  (category) =>
-                      category != SharingCategory.ruleInterpretations,
+                  (category) => category != SharingCategory.ruleInterpretations,
                 )
                 .map(_categoryLabel)
                 .join(', '),
@@ -707,9 +868,7 @@ class _UnavailableSection extends StatelessWidget {
   Widget build(BuildContext context) => SectionCard(
     title: title,
     icon: icon,
-    rows: const [
-      StateRow(label: 'Status', value: 'Temporarily unavailable'),
-    ],
+    rows: const [StateRow(label: 'Status', value: 'Temporarily unavailable')],
   );
 }
 
@@ -733,7 +892,10 @@ class _LocalBatterySummary extends StatelessWidget {
           value: _localObservation(state.percentage, (value) => '$value%'),
           emphasis: StateRowEmphasis.strong,
         ),
-        StateRow(label: 'Charging', value: _localObservation(charge, _batteryChargeLabel)),
+        StateRow(
+          label: 'Charging',
+          value: _localObservation(charge, _batteryChargeLabel),
+        ),
         if (charging)
           StateRow(
             label: 'Charging duration',

@@ -37,6 +37,62 @@ void main() {
     await gateway.location.close();
   });
 
+  test('server read keeps Firestore pending-write metadata separate', () async {
+    final gateway = _RecordingGateway();
+    final repository = FirestorePartnerDeviceStateRepository(gateway);
+    final receivedAt = DateTime.utc(2026, 9, 28);
+    gateway.serverDocuments[SyncDocumentKind.deviceState] = RemoteStateDocument(
+      data: <String, Object?>{
+        'ownerUserId': 'user-b',
+        'schemaVersion': 1,
+        'stateVersion': 3,
+        'observedAt': receivedAt,
+        'batteryPercentage': 72,
+      },
+      receivedAt: receivedAt,
+      isFromCache: false,
+      hasPendingWrites: true,
+    );
+
+    final partner = await repository.readFromServer(
+      pairId: 'pair-a',
+      partnerUserId: 'user-b',
+      watchLocation: false,
+    );
+
+    expect(partner?.state.stateVersion, 3);
+    expect(partner?.state.isFromCache, isFalse);
+    expect(partner?.state.hasPendingWrites, isTrue);
+    expect(gateway.readKinds, [SyncDocumentKind.deviceState]);
+  });
+
+  test(
+    'server read rejects a lower version instead of reporting no state',
+    () async {
+      final gateway = _RecordingGateway();
+      final repository = FirestorePartnerDeviceStateRepository(gateway);
+      final receivedAt = DateTime.utc(2026, 9, 28);
+      gateway.serverDocuments[SyncDocumentKind.deviceState] =
+          _serverStateDocument(receivedAt, 5);
+      await repository.readFromServer(
+        pairId: 'pair-a',
+        partnerUserId: 'user-b',
+        watchLocation: false,
+      );
+
+      gateway.serverDocuments[SyncDocumentKind.deviceState] =
+          _serverStateDocument(receivedAt, 4);
+      await expectLater(
+        repository.readFromServer(
+          pairId: 'pair-a',
+          partnerUserId: 'user-b',
+          watchLocation: false,
+        ),
+        throwsA(isA<StateVersionRegressionException>()),
+      );
+    },
+  );
+
   test('does not read a document the partner does not share', () async {
     final gateway = _RecordingGateway();
     final repository = FirestorePartnerDeviceStateRepository(gateway);
@@ -45,11 +101,7 @@ void main() {
     // The partner shares battery but not location, so the location read would
     // be denied by the rules. It must not be attempted at all.
     final result = repository
-        .watch(
-          pairId: 'pair-a',
-          partnerUserId: 'user-b',
-          watchLocation: false,
-        )
+        .watch(pairId: 'pair-a', partnerUserId: 'user-b', watchLocation: false)
         .first;
 
     gateway.state.add(
@@ -105,55 +157,67 @@ void main() {
     );
 
     final partner = await result;
-    expect(
-      gateway.watchedKinds,
-      isNot(contains(SyncDocumentKind.deviceState)),
-    );
+    expect(gateway.watchedKinds, isNot(contains(SyncDocumentKind.deviceState)));
     expect(partner?.state.observations, isEmpty);
     expect(partner?.state.location?.hasCoordinates, isTrue);
     await gateway.location.close();
   });
 
-  test('emits no-state without reading anything when nothing is shared', () async {
-    final gateway = _RecordingGateway();
-    final repository = FirestorePartnerDeviceStateRepository(gateway);
+  test(
+    'emits no-state without reading anything when nothing is shared',
+    () async {
+      final gateway = _RecordingGateway();
+      final repository = FirestorePartnerDeviceStateRepository(gateway);
 
-    final result = repository
-        .watch(
-          pairId: 'pair-a',
-          partnerUserId: 'user-b',
-          watchDeviceState: false,
-          watchLocation: false,
-        )
-        .first;
+      final result = repository
+          .watch(
+            pairId: 'pair-a',
+            partnerUserId: 'user-b',
+            watchDeviceState: false,
+            watchLocation: false,
+          )
+          .first;
 
-    // Nothing is watched at all, so no document is read and no controller needs
-    // to be closed here.
-    expect(await result, isNull);
-    expect(gateway.watchedKinds, isEmpty);
-  });
+      // Nothing is watched at all, so no document is read and no controller needs
+      // to be closed here.
+      expect(await result, isNull);
+      expect(gateway.watchedKinds, isEmpty);
+    },
+  );
 
-  test('emits explicit no-state after both initial documents are absent', () async {
-    final gateway = _RecordingGateway();
-    final repository = FirestorePartnerDeviceStateRepository(gateway);
-    final result = repository
-        .watch(pairId: 'pair-a', partnerUserId: 'user-b')
-        .first;
-    final receivedAt = DateTime.utc(2026, 9, 28);
+  test(
+    'emits explicit no-state after both initial documents are absent',
+    () async {
+      final gateway = _RecordingGateway();
+      final repository = FirestorePartnerDeviceStateRepository(gateway);
+      final result = repository
+          .watch(pairId: 'pair-a', partnerUserId: 'user-b')
+          .first;
+      final receivedAt = DateTime.utc(2026, 9, 28);
 
-    gateway.state.add(
-      RemoteStateDocument.absent(receivedAt: receivedAt),
-    );
-    gateway.location.add(
-      RemoteStateDocument.absent(receivedAt: receivedAt),
-    );
+      gateway.state.add(RemoteStateDocument.absent(receivedAt: receivedAt));
+      gateway.location.add(RemoteStateDocument.absent(receivedAt: receivedAt));
 
-    expect(await result, isNull);
-    expect(gateway.cancelled, isTrue);
-    await gateway.state.close();
-    await gateway.location.close();
-  });
+      expect(await result, isNull);
+      expect(gateway.cancelled, isTrue);
+      await gateway.state.close();
+      await gateway.location.close();
+    },
+  );
 }
+
+RemoteStateDocument _serverStateDocument(DateTime receivedAt, int version) =>
+    RemoteStateDocument(
+      data: <String, Object?>{
+        'ownerUserId': 'user-b',
+        'schemaVersion': 1,
+        'stateVersion': version,
+        'observedAt': receivedAt,
+        'batteryPercentage': 72,
+      },
+      receivedAt: receivedAt,
+      isFromCache: false,
+    );
 
 class _RecordingGateway implements DeviceStateSyncGateway {
   _RecordingGateway() {
@@ -166,6 +230,8 @@ class _RecordingGateway implements DeviceStateSyncGateway {
   final StreamController<RemoteStateDocument> location =
       StreamController<RemoteStateDocument>();
   final List<SyncDocumentKind> watchedKinds = <SyncDocumentKind>[];
+  final List<SyncDocumentKind> readKinds = <SyncDocumentKind>[];
+  final Map<SyncDocumentKind, RemoteStateDocument> serverDocuments = {};
   int cancelledStreams = 0;
   bool get cancelled => cancelledStreams == 2;
 
@@ -188,4 +254,15 @@ class _RecordingGateway implements DeviceStateSyncGateway {
     required String ownerId,
     required SyncPayload payload,
   }) async => const SyncWriteResult.published();
+
+  @override
+  Future<RemoteStateDocument> readFromServer({
+    required String pairId,
+    required String ownerId,
+    required SyncDocumentKind kind,
+  }) async {
+    readKinds.add(kind);
+    return serverDocuments[kind] ??
+        RemoteStateDocument.absent(receivedAt: DateTime.utc(2026));
+  }
 }
