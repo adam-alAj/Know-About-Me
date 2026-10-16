@@ -130,17 +130,24 @@ class LocationStateCollector {
   Future<DeviceLocationState> requestPermission() async {
     await _restoreLastKnownFix();
     if (!_platformSupported) return _publish();
+    // The cached permission can be out of date after the user changes it in
+    // Android Settings. Refresh before deciding whether another OS prompt is
+    // allowed or needed.
+    await _readStatus();
     if (_permission == DevicePermissionState.permanentlyDenied ||
         _permission == DevicePermissionState.restricted) {
-      await _readStatus();
+      _syncSubscription();
       return _publish();
     }
-    try {
-      _applyStatus(
-        LocationStatusSample.fromPlatform(await gateway.requestPermission()),
-      );
-    } catch (error) {
-      _statusError = 'Location permission request failed (${error.runtimeType}).';
+    if (_permission != DevicePermissionState.granted) {
+      try {
+        _applyStatus(
+          LocationStatusSample.fromPlatform(await gateway.requestPermission()),
+        );
+      } catch (error) {
+        _statusError =
+            'Location permission request failed (${error.runtimeType}).';
+      }
     }
     if (_canObserve) {
       await _readCurrentFix();

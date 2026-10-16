@@ -525,8 +525,8 @@ class MainActivity : FlutterActivity() {
             result.success(locationMap(cached))
             return
         }
-        val provider = bestProvider(manager)
-        if (provider == null) {
+        val providers = locationProviders(manager)
+        if (providers.isEmpty()) {
             result.success(cached?.let { locationMap(it) } ?: mapOf("error" to "no_fix"))
             return
         }
@@ -540,13 +540,29 @@ class MainActivity : FlutterActivity() {
             }
 
             override fun onProviderDisabled(provider: String) {
-                completeOneShot(oneShotFallback ?: mapOf("error" to "disabled"))
+                if (locationProviders(locationManager()).isEmpty()) {
+                    completeOneShot(oneShotFallback ?: mapOf("error" to "disabled"))
+                }
             }
         }
         oneShotListener = listener
-        try {
-            manager.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper())
-        } catch (error: RuntimeException) {
+        var requested = false
+        for (provider in providers) {
+            try {
+                manager.requestLocationUpdates(
+                    provider,
+                    0L,
+                    0f,
+                    listener,
+                    Looper.getMainLooper(),
+                )
+                requested = true
+            } catch (_: RuntimeException) {
+                // One provider can reject the current permission scope (for
+                // example GPS with approximate-only access). Try the others.
+            }
+        }
+        if (!requested) {
             completeOneShot(oneShotFallback ?: mapOf("error" to "no_fix"))
             return
         }
@@ -599,8 +615,8 @@ class MainActivity : FlutterActivity() {
             return
         }
         val manager = locationManager()
-        val provider = bestProvider(manager)
-        if (provider == null) {
+        val providers = locationProviders(manager)
+        if (providers.isEmpty()) {
             events.error("location_provider_unavailable", "No location provider is enabled.", null)
             return
         }
@@ -611,21 +627,31 @@ class MainActivity : FlutterActivity() {
             }
 
             override fun onProviderDisabled(provider: String) {
-                events.error("location_service_disabled", "Location services were disabled.", null)
+                if (locationProviders(locationManager()).isEmpty()) {
+                    events.error("location_service_disabled", "Location services were disabled.", null)
+                }
             }
         }
         locationListener = listener
-        try {
-            manager.requestLocationUpdates(
-                provider,
-                LOCATION_MIN_TIME_MS,
-                LOCATION_MIN_DISTANCE_M,
-                listener,
-                Looper.getMainLooper(),
-            )
-        } catch (error: RuntimeException) {
+        var requested = false
+        for (provider in providers) {
+            try {
+                manager.requestLocationUpdates(
+                    provider,
+                    LOCATION_MIN_TIME_MS,
+                    LOCATION_MIN_DISTANCE_M,
+                    listener,
+                    Looper.getMainLooper(),
+                )
+                requested = true
+            } catch (_: RuntimeException) {
+                // Continue if this provider is unavailable or requires a more
+                // precise grant than the user chose.
+            }
+        }
+        if (!requested) {
             locationListener = null
-            events.error("location_updates_failed", error.javaClass.simpleName, null)
+            events.error("location_updates_failed", "No permitted location provider.", null)
         }
     }
 
@@ -642,17 +668,25 @@ class MainActivity : FlutterActivity() {
     }
 
     @Suppress("DEPRECATION")
-    private fun bestProvider(manager: LocationManager): String? {
-        for (candidate in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
+    private fun locationProviders(manager: LocationManager): List<String> {
+        // Coarse-only grants cannot use GPS_PROVIDER. With precise access,
+        // register network first for a quick indoor fix and GPS as a fallback.
+        val candidates = if (hasPreciseLocationPermission()) {
+            listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
+        } else {
+            listOf(LocationManager.NETWORK_PROVIDER)
+        }
+        val available = mutableListOf<String>()
+        for (candidate in candidates) {
             if (manager.isProviderEnabled(candidate)) {
                 try {
-                    if (manager.getProvider(candidate) != null) return candidate
+                    if (manager.getProvider(candidate) != null) available.add(candidate)
                 } catch (_: IllegalArgumentException) {
                     // Provider not present on this device.
                 }
             }
         }
-        return null
+        return available
     }
 
     @Suppress("DEPRECATION")

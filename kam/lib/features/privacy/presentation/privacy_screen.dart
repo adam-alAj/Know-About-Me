@@ -8,7 +8,9 @@ import '../../../core/ui/widgets/app_card.dart';
 import '../../../core/ui/widgets/app_scaffold.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
 import '../../auth/presentation/providers/profile_controller.dart';
+import '../../device_state/domain/models/device_location_state.dart';
 import '../../device_state/domain/models/pair_sharing_state.dart';
+import '../../device_state/domain/models/state_observation.dart';
 import '../../device_state/presentation/providers/device_state_providers.dart';
 import '../../device_state/presentation/providers/sync_providers.dart';
 import '../../location/domain/models/location_state.dart';
@@ -314,29 +316,63 @@ class _HomeLocationCardState extends ConsumerState<_HomeLocationCard> {
 
   Future<void> _save() async {
     if (_busy) return;
-    final locationState = ref.read(currentLocalLocationStateProvider).value;
-    final fix =
-        locationState?.lastKnownLocation.value ?? locationState?.location.value;
-    if (fix == null) {
-      _message(
-        'A current location is needed to set your home. Allow location access '
-        'and try again once this device has a fix.',
-      );
-      return;
-    }
     setState(() => _busy = true);
-    final result = await ref
-        .read(profileControllerProvider.notifier)
-        .setHomeLocation(
-          HomeLocation(coordinate: fix.coordinate, label: 'Home'),
-        );
-    if (!mounted) return;
-    setState(() => _busy = false);
-    _message(
-      result.isSuccess
-          ? 'Home location saved on this device.'
-          : 'Your home location could not be saved. Try again.',
-    );
+    try {
+      // This explicit action may request OS permission. The collector first
+      // rechecks Android Settings and only prompts if needed.
+      final locationState = await ref
+          .read(locationStateCollectorProvider)
+          .requestPermission();
+      final fix = locationState.location.availability ==
+              CapabilityAvailability.available
+          ? locationState.location.value
+          : null;
+      if (fix == null) {
+        final permission = locationState.permission.value;
+        if (permission == DevicePermissionState.permanentlyDenied ||
+            permission == DevicePermissionState.restricted) {
+          _message(
+            'Location access is blocked. Enable it for Know About Me in Android app settings.',
+            actionLabel: 'Settings',
+            onAction: ref.read(locationStateCollectorProvider).openAppSettings,
+          );
+        } else if (locationState.serviceState == LocationServiceState.disabled) {
+          _message(
+            'Turn on Location in Android settings, or choose your home on the map.',
+            actionLabel: 'Choose on map',
+            onAction: _identifyOnMap,
+          );
+        } else if (locationState.location.availability ==
+            CapabilityAvailability.stale) {
+          _message(
+            'The last location is stale. Retry for a fresh fix, or choose your home manually on the map.',
+            actionLabel: 'Choose on map',
+            onAction: _identifyOnMap,
+          );
+        } else {
+          _message(
+            'No location fix arrived. Retry, or choose your home on the map.',
+            actionLabel: 'Choose on map',
+            onAction: _identifyOnMap,
+          );
+        }
+        return;
+      }
+      final result = await ref
+          .read(profileControllerProvider.notifier)
+          .setHomeLocation(
+            HomeLocation(coordinate: fix.coordinate, label: 'Home'),
+          );
+      _message(
+        result.isSuccess
+            ? 'Home location saved on this device.'
+            : 'Your home location could not be saved. Try again.',
+      );
+    } catch (_) {
+      _message('Could not update your home location. Try again.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _remove() async {
@@ -361,11 +397,25 @@ class _HomeLocationCardState extends ConsumerState<_HomeLocationCard> {
     await context.pushNamed(AppRoutes.homeLocationMap);
   }
 
-  void _message(String text) {
+  void _message(
+    String text, {
+    String? actionLabel,
+    Future<void> Function()? onAction,
+  }) {
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text(text)));
+    ).showSnackBar(
+      SnackBar(
+        content: Text(text),
+        action: actionLabel == null || onAction == null
+            ? null
+            : SnackBarAction(
+                label: actionLabel,
+                onPressed: () => onAction(),
+              ),
+      ),
+    );
   }
 
   @override
@@ -405,8 +455,10 @@ class _HomeLocationCardState extends ConsumerState<_HomeLocationCard> {
           const SizedBox(height: 8),
           AppButton.secondary(
             label: home == null
-                ? 'Use current location'
-                : 'Update from current location',
+                ? (_busy ? 'Getting location…' : 'Use current location')
+                : (_busy
+                    ? 'Getting location…'
+                    : 'Update from current location'),
             icon: Icons.my_location,
             onPressed: _busy ? null : _save,
           ),

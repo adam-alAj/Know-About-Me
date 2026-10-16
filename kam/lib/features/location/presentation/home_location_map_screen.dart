@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,15 +11,15 @@ import '../../../core/ui/widgets/app_card.dart';
 import '../../../core/ui/widgets/app_scaffold.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
 import '../../auth/presentation/providers/profile_controller.dart';
-import '../../device_state/presentation/providers/device_state_providers.dart';
 import '../domain/models/location_state.dart';
+import '../domain/services/current_location_service.dart';
 
 /// Identifies the user's private home on a map (SRS FR-022).
 ///
-/// The map opens at the already-configured home, or failing that at this
-/// device's own fix, and the pin fixed at the centre of the map marks the chosen
-/// point. Only the chosen coordinate is stored, and only in the owner-only
-/// preferences document: the partner never receives it, only the derived
+/// The map opens immediately at the already-configured home, this device's
+/// fix when available, or a wide fallback view. The pin fixed at the centre of
+/// the map marks the chosen point. Only the chosen coordinate is stored in the
+/// owner-only preferences document. The partner receives only the derived
 /// distance and at-home / away status they are allowed to see.
 ///
 /// The map is a deliberate user action, not an observation: this screen never
@@ -102,33 +104,81 @@ class _HomeLocationMapScreenState extends ConsumerState<HomeLocationMapScreen> {
   Future<void> _centreOnCurrentLocation() async {
     if (_busy) return;
     setState(() => _busy = true);
+    const locationService = CurrentLocationService();
     try {
-      // Read the platform once, through the same collector the rest of the app
-      // uses. A missing permission or a switched-off service yields no fix, and
-      // the user is told so rather than being shown an invented position.
-      final state = await ref.read(locationStateCollectorProvider).refresh();
-      final fix =
-          state.location.value?.coordinate ??
-          state.lastKnownLocation.value?.coordinate;
+      final result = await locationService.fetch();
       if (!mounted) return;
-      if (fix == null) {
-        _message(
-          'No location is available yet. Check that location access is on, '
-          'then try again.',
-        );
-        return;
+      _controller.move(
+        LatLng(result.position.latitude, result.position.longitude),
+        _centreZoom,
+      );
+      if (result.source == LocationResultSource.cached) {
+        _message('Using a recent location. Retry for a fresh position.');
       }
-      _controller.move(LatLng(fix.latitude, fix.longitude), _centreZoom);
+    } on LocationFetchException catch (error) {
+      if (!mounted) return;
+      switch (error.reason) {
+        case LocationFetchFailure.serviceDisabled:
+          _message(
+            'Turn on Location in device settings, then try again.',
+            actionLabel: 'Settings',
+            onAction: () async {
+              await locationService.openLocationSettings();
+            },
+          );
+        case LocationFetchFailure.permissionDenied:
+          _message(
+            'Allow location access to center the map. You can also choose '
+            'your home by moving the map pin.',
+            actionLabel: 'Retry',
+            onAction: _centreOnCurrentLocation,
+          );
+        case LocationFetchFailure.permissionDeniedForever:
+          _message(
+            'Location access is blocked. Enable it in app settings, or '
+            'choose your home manually on the map.',
+            actionLabel: 'Settings',
+            onAction: () async {
+              await locationService.openAppSettings();
+            },
+          );
+        case LocationFetchFailure.noUsableFix:
+          _message(
+            'No recent accurate location is available. Retry outdoors or '
+            'move the map pin to choose your home manually.',
+            actionLabel: 'Retry',
+            onAction: _centreOnCurrentLocation,
+          );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      _message(
+        'Could not read this device’s location. You can retry or choose a point on the map.',
+        actionLabel: 'Retry',
+        onAction: _centreOnCurrentLocation,
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  void _message(String text) {
+  void _message(
+    String text, {
+    String? actionLabel,
+    Future<void> Function()? onAction,
+  }) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(text)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(text),
+        action: actionLabel == null || onAction == null
+            ? null
+            : SnackBarAction(
+                label: actionLabel,
+                onPressed: () => unawaited(onAction()),
+              ),
+      ),
+    );
   }
 
   @override
@@ -137,23 +187,9 @@ class _HomeLocationMapScreenState extends ConsumerState<HomeLocationMapScreen> {
         .watch(currentUserPreferencesProvider)
         .value
         ?.valueOrNull;
-    final locationAsync = ref.watch(currentLocalLocationStateProvider);
     final home = preferences?.homeLocation;
 
-    // A configured home is authoritative and immediately available; only when
-    // there is none do we wait for this device's own first reading, so the map
-    // does not open at a wide view and then jump.
-    if (home == null && locationAsync.isLoading) {
-      return const AppScaffold(
-        title: 'Identify home',
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    final fix =
-        locationAsync.value?.location.value?.coordinate ??
-        locationAsync.value?.lastKnownLocation.value?.coordinate;
-    final anchor = home?.coordinate ?? fix;
+    final anchor = home?.coordinate;
     final hasPosition = anchor != null;
     final centre = anchor == null
         ? _worldCentre
@@ -208,8 +244,8 @@ class _HomeLocationMapScreenState extends ConsumerState<HomeLocationMapScreen> {
               if (!hasPosition) ...[
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  'This device has no location right now, so the map opened at '
-                  'a wide view. Pan to your home, or use your current location.',
+                  'No home is configured yet. Pan to your home, or use your '
+                  'current location to center the map.',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -221,7 +257,7 @@ class _HomeLocationMapScreenState extends ConsumerState<HomeLocationMapScreen> {
               ),
               const SizedBox(height: AppSpacing.sm),
               AppButton.secondary(
-                label: 'Use my current location',
+                label: _busy ? 'Finding location…' : 'Use my current location',
                 icon: Icons.my_location,
                 onPressed: _busy ? null : _centreOnCurrentLocation,
               ),
