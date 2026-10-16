@@ -59,6 +59,14 @@ class KamApp extends ConsumerWidget {
             .collectNow();
         await ref.read(deviceStateSyncCoordinatorProvider)?.publishNow(snapshot);
       },
+      onPeriodicSync: () async {
+        final snapshot = await ref
+            .read(deviceMonitoringControllerProvider)
+            .collectNow();
+        await ref
+            .read(deviceStateSyncCoordinatorProvider)
+            ?.reconcileNow(snapshot);
+      },
       child: MaterialApp.router(
         title: 'Know About Me',
         debugShowCheckedModeBanner: false,

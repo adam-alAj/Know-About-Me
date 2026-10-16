@@ -34,6 +34,7 @@ class DeviceMonitoringLifecycle extends StatefulWidget {
     this.activityCollector,
     this.onResume,
     this.onBackground,
+    this.onPeriodicSync,
     super.key,
   });
   final DeviceMonitoringController controller;
@@ -56,6 +57,10 @@ class DeviceMonitoringLifecycle extends StatefulWidget {
   /// locally and then never reached the partner.
   final Future<void> Function()? onBackground;
 
+  /// Best-effort foreground heartbeat. Mobile operating systems do not allow
+  /// an app to keep a Dart timer running after suspension.
+  final Future<void> Function()? onPeriodicSync;
+
   final Widget child;
 
   @override
@@ -69,6 +74,10 @@ class _DeviceMonitoringLifecycleState extends State<DeviceMonitoringLifecycle>
   /// be doing. A slow background read can then avoid tearing down a
   /// subscription that a following resume has just started.
   int _lifecycleToken = 0;
+  Timer? _foregroundSyncTimer;
+  bool _periodicSyncRunning = false;
+
+  static const _foregroundSyncInterval = Duration(minutes: 5);
 
   @override
   void initState() {
@@ -84,6 +93,7 @@ class _DeviceMonitoringLifecycleState extends State<DeviceMonitoringLifecycle>
       );
     }
     widget.controller.startMonitoring();
+    _startForegroundSyncTimer();
   }
 
   @override
@@ -92,6 +102,7 @@ class _DeviceMonitoringLifecycleState extends State<DeviceMonitoringLifecycle>
     if (state == AppLifecycleState.resumed) {
       _lifecycleToken++;
       widget.controller.startMonitoring();
+      _startForegroundSyncTimer();
       // A resumed app cannot assume a background listener or timer stayed
       // alive, so the connection is re-derived from fresh evidence and any
       // unfinished publish is re-requested (Phase 20 §20).
@@ -111,6 +122,8 @@ class _DeviceMonitoringLifecycleState extends State<DeviceMonitoringLifecycle>
     // Publish the current state (including the display state) before releasing
     // the observers. This is event-driven, never a timer (Phase 9, FR-016).
     final token = ++_lifecycleToken;
+    _foregroundSyncTimer?.cancel();
+    _foregroundSyncTimer = null;
     unawaited(_captureFinalScreenStateThenStop(token));
   }
 
@@ -131,8 +144,27 @@ class _DeviceMonitoringLifecycleState extends State<DeviceMonitoringLifecycle>
     await widget.controller.stopMonitoring();
   }
 
+  void _startForegroundSyncTimer() {
+    _foregroundSyncTimer?.cancel();
+    _foregroundSyncTimer = Timer.periodic(_foregroundSyncInterval, (_) {
+      if (_periodicSyncRunning || !mounted) return;
+      _periodicSyncRunning = true;
+      unawaited(() async {
+        try {
+          await widget.onPeriodicSync?.call();
+        } catch (_) {
+          // A transient collection/write failure is retried by the next
+          // lifecycle or periodic trigger; it must not escape the zone.
+        } finally {
+          _periodicSyncRunning = false;
+        }
+      }());
+    });
+  }
+
   @override
   void dispose() {
+    _foregroundSyncTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.dispose();
     super.dispose();

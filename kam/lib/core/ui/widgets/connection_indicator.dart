@@ -49,8 +49,9 @@ class ConnectionIndicator extends StatelessWidget {
   /// Shown while a local change is waiting for the backend to acknowledge it.
   static const String waitingLabel = 'Waiting to sync';
 
-  /// Shown when the backend refused the work permanently.
-  static const String blockedLabel = 'Permission required';
+  /// Shown when backend authorization or validation refused a write.
+  /// This is not necessarily an operating-system permission.
+  static const String blockedLabel = 'Sync blocked';
 
   /// The label for [status], or `null` when there is nothing honest to say.
   ///

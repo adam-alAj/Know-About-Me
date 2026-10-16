@@ -163,6 +163,10 @@ class DeviceStateSyncService {
 
   SyncRequest? _latest;
   bool _running = false;
+  // Immediate publishes are used by lifecycle transitions and explicit
+  // refreshes. Keep them on one queue too: otherwise two calls can both read
+  // the same persisted version and race their Firestore writes.
+  Future<void> _immediatePublishTail = Future<void>.value();
   int? _version;
   bool _disposed = false;
 
@@ -224,6 +228,33 @@ class DeviceStateSyncService {
     required bool sharingPaused,
   }) async {
     if (_disposed) return const <SyncOutcome>[];
+
+    final result = Completer<List<SyncOutcome>>();
+    _immediatePublishTail = _immediatePublishTail.then((_) async {
+      if (_disposed) {
+        result.complete(const <SyncOutcome>[]);
+        return;
+      }
+      try {
+        result.complete(await _publishNow(
+          pairId: pairId,
+          snapshot: snapshot,
+          sharedCategories: sharedCategories,
+          sharingPaused: sharingPaused,
+        ));
+      } catch (error, stackTrace) {
+        result.completeError(error, stackTrace);
+      }
+    });
+    return result.future;
+  }
+
+  Future<List<SyncOutcome>> _publishNow({
+    required String pairId,
+    required DeviceStateSnapshot snapshot,
+    required Set<SharingCategory> sharedCategories,
+    required bool sharingPaused,
+  }) async {
 
     final deviceState = _sanitizer.sanitizeDeviceState(
       snapshot: snapshot,

@@ -34,9 +34,18 @@ class ConnectionStatusBanner extends ConsumerWidget {
         AppSpacing.md,
         0,
       ),
-      child: Align(
-        alignment: Alignment.center,
-        child: ConnectionIndicator(status: status),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          ConnectionIndicator(status: status),
+          if (status.isBlocked) ...[
+            const SizedBox(height: AppSpacing.xs),
+            const Text(
+              'Firestore rejected this device update. Check that the pair is active, both people consented, and your sharing categories are enabled.',
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ],
       ),
     );
   }
