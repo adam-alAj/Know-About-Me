@@ -35,12 +35,17 @@ model for current presentation consumers.
 
 `DeviceStateProvider` supports one-shot collection and a best-effort stream.
 `DeviceMonitoringController` exposes start, stop, and collect-now commands.
-`DeviceMonitoringLifecycle` starts observation at launch/resume and stops it
-when Flutter reports inactive, paused, or detached. It also pushes each
+`DeviceMonitoringLifecycle` starts observation at launch/resume. On Android,
+it performs a final publish when the app is paused and keeps the root-owned
+event subscriptions alive while the process remains resident; on detach it
+releases them. It also pushes each
 lifecycle transition into the activity collector, where an observed
 transition is a supported signal while an initial report only establishes the
-current phase. No periodic scheduler or
-terminated-app execution is promised.
+current phase. This is best-effort process-resident collection, not a guarantee
+of execution after process death. Android WorkManager also samples and publishes
+battery, network, and display state during deferred periodic work, and refreshes
+authorized partner documents into Firestore's local cache. The minimum interval
+is 15 minutes and actual execution is OS-controlled. It never collects location.
 
 ## Local and partner data
 
@@ -55,7 +60,9 @@ Firestore Security Rules for authorization.
 ## Efficiency and privacy
 
 There is no polling loop, high-frequency telemetry, background location request,
-Firestore write, or background service. Location is read once per refresh while
+or app-owned foreground service. While Android keeps the process alive, native battery,
+network, and display event streams can trigger the existing authenticated
+Firestore publish pipeline. Location is read once per refresh while
 the app is in the foreground and monitoring is active, and the native bridges
 throttle updates (Android 60 s/100 m, iOS `distanceFilter` 100 m). The local
 repository caches one snapshot and refreshes only when explicitly asked. Logs

@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kam/core/domain/device_metric.dart';
@@ -102,7 +102,7 @@ void main() {
       await collector.refresh();
       expect(gateway.fixReads, 0);
 
-      gateway.status = _status(permission: 'granted');
+      gateway.permissionRequestResult = _status(permission: 'granted');
       gateway.fix = _fix(latitude: 31.9, longitude: 35.2);
       final state = await collector.requestPermission();
 
@@ -716,6 +716,7 @@ class _FakeGateway implements LocationPlatformGateway {
   });
 
   LocationStatusSample status;
+  LocationStatusSample? permissionRequestResult;
   LocationFixSample? fix;
   Object? statusException;
   Object? fixException;
@@ -740,7 +741,9 @@ class _FakeGateway implements LocationPlatformGateway {
     permissionRequests++;
     final error = statusException;
     if (error != null) throw error;
-    return status;
+    final result = permissionRequestResult ?? status;
+    status = result;
+    return result;
   }
 
   @override

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/config/app_config.dart';
 import '../core/firebase/firebase_bootstrap.dart';
 import '../core/logging/app_logger.dart';
+import '../features/device_state/data/background/background_sync_scheduler.dart';
 import 'app.dart';
 import 'error_boundary.dart';
 import 'providers.dart';
@@ -76,6 +77,9 @@ abstract final class AppBootstrap {
         useGeneratedFirebaseOptions: true,
         logger: logger,
       );
+      if (FirebaseBootstrap.isInitialized && !kIsWeb) {
+        await BackgroundSyncScheduler.initializeAndSchedule();
+      }
       runApp(
         ProviderScope(
           overrides: [appConfigProvider.overrideWithValue(config)],

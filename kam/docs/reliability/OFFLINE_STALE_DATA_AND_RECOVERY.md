@@ -82,7 +82,7 @@ The existing notification planner only accepts eligible new matched transitions 
 
 ## 16. Lifecycle recovery
 
-`DeviceMonitoringLifecycle` restarts monitoring and invokes a resume hook on foreground resume; it stops observation on other lifecycle phases. The controller clears its subscription handle before awaiting cancellation, preventing a rapid inactive/resumed transition from leaving a stopped monitor that appears active. Resume refreshes derived connection evidence and reasserts the latest snapshot; it does not claim background monitoring continued. Platform collectors remain best effort and platform capability restrictions are documented in `docs/platform/PLATFORM_CAPABILITIES.md` and `docs/device-state/DEVICE_STATE_ARCHITECTURE.md`.
+`DeviceMonitoringLifecycle` restarts monitoring and invokes a resume hook on foreground resume. On Android pause it first publishes a final snapshot, stops native location updates, then retains battery/network/display event subscriptions while the process remains resident; on detach it releases them. The controller still prevents duplicate subscriptions on resume. This supports event-driven changes during ordinary backgrounding, but does not keep Dart timers alive. Android WorkManager also samples battery/network/display and publishes a sanitized, authenticated device-state document after server-confirmed pair/consent/sharing checks; it separately refreshes authorized partner documents into local cache. The 15-minute minimum is inexact and work can be deferred; force-stop disables it until relaunch. Location is never sampled in background. Platform restrictions are detailed in `docs/platform/PLATFORM_CAPABILITIES.md` and `docs/device-state/DEVICE_STATE_ARCHITECTURE.md`.
 
 ## 17. Listener recovery
 

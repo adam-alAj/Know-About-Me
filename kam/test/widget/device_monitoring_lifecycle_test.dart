@@ -119,6 +119,40 @@ void main() {
     expect(backgrounded, 1);
     expect(repository.cancellations, 1);
   });
+
+  testWidgets('Android mode keeps one event subscription across background', (
+    tester,
+  ) async {
+    final repository = _CountingRepository();
+    final controller = DeviceMonitoringController(repository);
+    var backgrounded = 0;
+
+    await tester.pumpWidget(
+      DeviceMonitoringLifecycle(
+        controller: controller,
+        keepNativeMonitoringInBackground: true,
+        onBackground: () async {
+          backgrounded++;
+        },
+        child: const SizedBox.shrink(),
+      ),
+    );
+    final observer =
+        tester.state(find.byType(DeviceMonitoringLifecycle))
+            as WidgetsBindingObserver;
+
+    observer.didChangeAppLifecycleState(AppLifecycleState.paused);
+    await tester.pumpAndSettle();
+
+    expect(backgrounded, 1);
+    expect(repository.subscriptions, 1);
+    expect(repository.cancellations, 0);
+
+    observer.didChangeAppLifecycleState(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(repository.subscriptions, 1);
+    expect(repository.cancellations, 0);
+  });
 }
 
 class _CountingRepository implements DeviceStateRepository {

@@ -19,19 +19,19 @@ These values describe repository configuration at Phase 21. Actual build compati
 
 | Capability | Android implementation | Permission / behavior | Limitations |
 | --- | --- | --- | --- |
-| Battery and charging | Android battery broadcast via native bridge | No runtime permission | Charging duration is process-local and only measured after an observed transition; restarts and collection gaps lose continuity. |
-| Network transport and reachability | ConnectivityManager network callbacks and capabilities | `ACCESS_NETWORK_STATE` | Describes OS-reported transport and validated Internet reachability, not Firebase/backend availability. |
-| Display and activity | DisplayManager default display state; native activity event bridge | No runtime permission | Unknown/intermediate display state is not treated as on or off. App lifecycle and OEM behavior can interrupt observations. |
+| Battery and charging | Android battery broadcast via native bridge; periodic Workmanager sample | No runtime permission | Root event subscription works while process/activity remains resident; Workmanager samples at 15-minute minimum cadence but can be delayed. Charging duration is not inferred by periodic sampling and can lose continuity across observation gaps. |
+| Network transport and reachability | ConnectivityManager callbacks/capabilities; periodic Workmanager sample | `ACCESS_NETWORK_STATE` | Describes OS-reported transport and validated Internet reachability, not Firebase/backend availability. Background callback/task timing is best effort. |
+| Display and activity | DisplayManager state; native event bridge; periodic PowerManager sample | No runtime permission | Screen state can be sampled periodically; human activity history is not inferred. Lifecycle and OEM behavior can interrupt event observations. |
 | Foreground location | LocationManager | Coarse/fine location runtime permission | Foreground only; no background permission or service. Updates are best effort and can be delayed or unavailable. |
 | Notifications | Android notification manager and local notification bridge | Android 13+ `POST_NOTIFICATIONS`; app notification setting checked on all supported APIs | Permission grant does not guarantee delivery; channel and system settings still apply. |
 
-Android 13 and newer require runtime notification permission. Location is requested only while the app is in use; permanent denial should direct the user to app settings. A one-time location grant that expires is treated as no longer granted. The app does not declare background location access or a foreground service.
+Android 13 and newer require runtime notification permission. Location is requested only while the app is in use; permanent denial should direct the user to app settings. A one-time location grant that expires is treated as no longer granted. KAM does not declare background location or implement its own foreground service. The Workmanager dependency contributes an optional internal `SystemForegroundService`, `FOREGROUND_SERVICE_SHORT_SERVICE`, and wake-lock declarations to the merged manifest; this periodic task does not start that service.
 
 ## Offline, privacy, and lifecycle
 
 Network connectivity, validated Internet access, Firebase availability, cached data, and stale data are separate states. A network callback cannot prove a Firebase request will succeed. See [offline, stale data, and recovery](../reliability/OFFLINE_STALE_DATA_AND_RECOVERY.md).
 
-Collectors are best effort while the app process is active. Android may suspend or terminate background processes, and callbacks can be delayed by power management, OEM policy, permission changes, or unavailable hardware. This implementation does not promise continuous background monitoring.
+Battery, network, and display event subscriptions remain attached to the root monitoring owner after the app is paused, so changes may be collected and published while Android keeps the process alive. A Workmanager task samples those three supported categories and publishes through the authenticated Firestore client after checking active pairing, both consents, and the owner's current sharing settings. It also refreshes authorized partner documents into local cache. Its 15-minute minimum periodic schedule is inexact and may be delayed by Doze, standby, or OEM policy. Android can kill the process or suspend work; force-stop prevents scheduled work until the user launches KAM again. Location remains foreground-only and is never read by the background worker.
 
 Location and device state follow the sharing/authorization boundaries in [security and authorization](../security/SECURITY_AND_AUTHORIZATION.md) and [privacy and sharing](../privacy/PRIVACY_SHARING_AND_CONNECTION_LIFECYCLE.md). Android cloud backup and device transfer are disabled/excluded for app data because local preferences may contain sensitive state. Backup rules are in `android/app/src/main/res/xml/`.
 
@@ -51,7 +51,9 @@ Run on an Android API 24 device/emulator and an API 33+ device/emulator. Record 
 | Wi-Fi/mobile/offline transitions | Transport and Internet validation update independently of backend state. |
 | Lock/unlock and screen off/on | Display state updates when callbacks are available; unknown remains unknown. |
 | Charging transition and process restart | Charging status updates; duration continuity is not assumed across restart. |
-| Background app for an extended period | Treat delayed/missed samples as expected platform limitation; no continuous guarantee. |
+| Background app while process remains resident | Battery/network/display changes may be collected event-driven; verify Firestore writes and record any OS delay. |
+| Process killed or device in Doze | Workmanager may perform a deferred current-state sample; do not expect immediate collection. Verify actual task run and publication. |
+| App force-stopped in Settings | Workmanager is not expected to run until the user launches KAM again. |
 | Reinstall/restore or device transfer | Sensitive local app data is not restored by configured backup rules. |
 
 ## Platform references

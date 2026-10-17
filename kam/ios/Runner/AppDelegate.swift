@@ -3,6 +3,7 @@ import Flutter
 import UserNotifications
 import Network
 import UIKit
+import workmanager_apple
 
 /// Foreground-only location bridge (Phase 10).
 ///
@@ -282,6 +283,10 @@ private func networkReading(_ path: NWPath) -> [String: String] {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    WorkmanagerPlugin.registerLaunchHandlers()
+    WorkmanagerPlugin.setPluginRegistrantCallback { registry in
+      GeneratedPluginRegistrant.register(with: registry)
+    }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 

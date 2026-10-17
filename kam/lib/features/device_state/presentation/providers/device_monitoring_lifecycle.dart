@@ -20,7 +20,8 @@ AppLifecyclePhase appLifecyclePhaseOf(AppLifecycleState state) =>
     };
 
 /// Maps Flutter app lifecycle to best-effort monitoring commands. Resume does
-/// one collection; inactive/paused/detached stops the stream promptly.
+/// one collection; Android keeps subscriptions on pause when configured, and
+/// detach (or pause on other platforms) releases them after a final publish.
 ///
 /// Each lifecycle transition is also reported to the optional
 /// [activityCollector], which is the supported signal source for the
@@ -34,7 +35,9 @@ class DeviceMonitoringLifecycle extends StatefulWidget {
     this.activityCollector,
     this.onResume,
     this.onBackground,
+    this.onBackgroundError,
     this.onPeriodicSync,
+    this.keepNativeMonitoringInBackground = false,
     super.key,
   });
   final DeviceMonitoringController controller;
@@ -47,8 +50,8 @@ class DeviceMonitoringLifecycle extends StatefulWidget {
   /// must never end up with two listeners for the same data (Phase 20 §20, §21).
   final VoidCallback? onResume;
 
-  /// Run once when the application leaves the foreground, *before* monitoring is
-  /// released.
+  /// Run once when the application leaves the foreground, before any platform
+  /// subscription is released.
   ///
   /// This is where the last observed state is published immediately. The
   /// synchronization service normally coalesces writes over a short window via a
@@ -57,9 +60,19 @@ class DeviceMonitoringLifecycle extends StatefulWidget {
   /// locally and then never reached the partner.
   final Future<void> Function()? onBackground;
 
+  /// Receives failures from the final background reconciliation so they can
+  /// be reported without preventing subscription cleanup on platforms that
+  /// stop monitoring in the background.
+  final void Function(Object error, StackTrace stackTrace)? onBackgroundError;
+
   /// Best-effort foreground heartbeat. Mobile operating systems do not allow
   /// an app to keep a Dart timer running after suspension.
   final Future<void> Function()? onPeriodicSync;
+
+  /// Keeps Android's event-driven platform subscriptions alive while the app
+  /// is backgrounded. Android may still suspend or kill the process, so this
+  /// does not provide continuous execution or keep Dart timers running.
+  final bool keepNativeMonitoringInBackground;
 
   final Widget child;
 
@@ -124,10 +137,20 @@ class _DeviceMonitoringLifecycleState extends State<DeviceMonitoringLifecycle>
     final token = ++_lifecycleToken;
     _foregroundSyncTimer?.cancel();
     _foregroundSyncTimer = null;
-    unawaited(_captureFinalScreenStateThenStop(token));
+    unawaited(
+      _captureFinalScreenStateThenStop(
+        token,
+        keepMonitoring:
+            state == AppLifecycleState.paused &&
+            widget.keepNativeMonitoringInBackground,
+      ),
+    );
   }
 
-  Future<void> _captureFinalScreenStateThenStop(int token) async {
+  Future<void> _captureFinalScreenStateThenStop(
+    int token, {
+    required bool keepMonitoring,
+  }) async {
     // Read the whole current state and publish it immediately, before the
     // observers are released and before the process can be suspended. The
     // collectors re-read the display state here, so a screen-off transition at
@@ -135,12 +158,14 @@ class _DeviceMonitoringLifecycleState extends State<DeviceMonitoringLifecycle>
     // than being left to a coalescing timer that will not fire while suspended.
     try {
       await widget.onBackground?.call();
-    } catch (_) {
+    } catch (error, stackTrace) {
       // A failed publish must never block releasing the platform observers.
+      widget.onBackgroundError?.call(error, stackTrace);
     }
     // A resume that happened while the publish was in flight has superseded this
     // stop; cancelling now would tear down the subscription it just started.
     if (token != _lifecycleToken) return;
+    if (keepMonitoring) return;
     await widget.controller.stopMonitoring();
   }
 

@@ -5,7 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kam/features/device_state/domain/models/device_location_state.dart';
 import 'package:kam/features/device_state/domain/models/pair_sharing_state.dart';
-import 'package:kam/features/device_state/domain/models/state_observation.dart';
+import 'package:kam/features/device_state/domain/services/location_observation_store.dart';
+import 'package:kam/features/device_state/domain/services/location_state_collector.dart';
+import 'package:kam/features/device_state/domain/sources/location_platform_source.dart';
 import 'package:kam/features/device_state/presentation/providers/device_state_providers.dart';
 import 'package:kam/features/device_state/presentation/providers/sync_providers.dart';
 import 'package:kam/features/location/domain/models/location_state.dart';
@@ -91,35 +93,24 @@ void main() {
       coordinate: const Coordinate(latitude: 1.25, longitude: 2.5),
       observedAt: observedAt,
     );
-    final locationState = DeviceLocationState(
-      location: StateObservation<LocationFix>(
-        availability: CapabilityAvailability.available,
-        value: fixWithTime,
-        observedAt: observedAt,
+    final locationCollector = LocationStateCollector(
+      gateway: _GrantedLocationGateway(
+        LocationFixSample(
+          latitude: fixWithTime.coordinate.latitude,
+          longitude: fixWithTime.coordinate.longitude,
+          observedAt: observedAt,
+        ),
       ),
-      lastKnownLocation: StateObservation<LocationFix>(
-        availability: CapabilityAvailability.available,
-        value: fixWithTime,
-        observedAt: observedAt,
-      ),
-      permission: const StateObservation<DevicePermissionState>(
-        availability: CapabilityAvailability.available,
-        value: DevicePermissionState.granted,
-      ),
-      serviceState: LocationServiceState.enabled,
-      distanceFromHome: const StateObservation<double>(
-        availability: CapabilityAvailability.unavailable,
-      ),
-      presence: HomePresence.unknown,
+      store: _MemoryLocationStore(),
+      now: () => observedAt,
     );
+    addTearDown(locationCollector.dispose);
 
     await pumpTestApp(
       tester,
       profileRepository: profiles,
       overrides: [
-        currentLocalLocationStateProvider.overrideWith(
-          (ref) => Stream.value(locationState),
-        ),
+        locationStateCollectorProvider.overrideWithValue(locationCollector),
       ],
     );
     await tester.tap(find.text('Privacy'));
@@ -144,4 +135,41 @@ void main() {
     // shared document here.
     expect(find.textContaining('1.25'), findsNothing);
   });
+}
+
+class _GrantedLocationGateway implements LocationPlatformGateway {
+  const _GrantedLocationGateway(this.fix);
+
+  final LocationFixSample fix;
+
+  @override
+  String get platformName => 'android';
+
+  @override
+  Future<Object?> readStatus() async => const LocationStatusSample(
+    supported: true,
+    permission: 'granted',
+    precise: true,
+    serviceEnabled: true,
+  );
+
+  @override
+  Future<Object?> requestPermission() => readStatus();
+
+  @override
+  Future<void> openAppSettings() async {}
+
+  @override
+  Future<Object?> readCurrentLocation() async => fix;
+
+  @override
+  Stream<Object?> watchChanges() => const Stream.empty();
+}
+
+class _MemoryLocationStore implements LocationObservationStore {
+  @override
+  Future<LocationFix?> readLastKnownFix() async => null;
+
+  @override
+  Future<void> writeLastKnownFix(LocationFix value) async {}
 }

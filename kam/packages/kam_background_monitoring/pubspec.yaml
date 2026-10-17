@@ -1,0 +1,19 @@
+name: kam_background_monitoring
+description: Android background device-state sampling bridge for KAM.
+publish_to: none
+version: 0.1.0
+environment:
+  sdk: ^3.12.2
+  flutter: ">=3.3.0"
+dependencies:
+  flutter:
+    sdk: flutter
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.aj.kam.background_monitoring
+        pluginClass: BackgroundDeviceStatePlugin

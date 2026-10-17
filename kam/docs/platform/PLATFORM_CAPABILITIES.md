@@ -18,7 +18,7 @@ Runtime device validation is still BLOCKED; see the Phase 26 and 27 reports.
 | Device availability | Derived from successful sync/last-seen observations | None | Active/recent/offline/unknown indicate reachability evidence only, not physical power state. |
 | Foreground location | Native `LocationManager` bridge | Coarse and/or fine location, requested contextually | Foreground only. Approximate accuracy, service state, denial, and stale time must be represented. No background collection. |
 | Notifications | Local native notification channel (`Rule alerts`) through MethodChannel | `POST_NOTIFICATIONS` on Android 13+; app settings also apply | Local delivery is best effort. Generic title/body; no partner details in lock-screen text. No FCM or remote push. Delivery requires actual device validation. |
-| App lifecycle | Flutter lifecycle owner and Android Activity lifecycle | None | Monitoring stops/refreshes around lifecycle changes. Android may suspend or kill background work; no 24/7 guarantee. |
+| App lifecycle | Flutter lifecycle owner and Android Activity lifecycle | None | Android root event subscriptions remain active while the process is resident in the background. OS suspension/termination may delay or stop collection; no 24/7 guarantee. |
 
 ## Permission and sharing are separate
 
@@ -27,10 +27,12 @@ enable the category for the partner, and Firestore Rules enforce that sharing
 decision on remote access. A locally available value is not automatically
 authorized for sharing.
 
-The manifest declares Internet, network state, foreground coarse/fine location,
-and notification permission. It does not declare background location or a
-foreground service. Android 13+ notification permission can be denied; earlier
-versions still depend on app/channel settings.
+The app manifest declares Internet, network state, foreground coarse/fine
+location, and notification permission. It does not request background location
+or implement an app-owned foreground service. Workmanager contributes an
+optional internal foreground-service declaration to the merged manifest, but
+the periodic cache catch-up task does not start it. Android 13+ notification
+permission can be denied; earlier versions still depend on app/channel settings.
 
 ## Required state semantics
 
@@ -64,6 +66,10 @@ this app has no such signal.
   stale; there is no continuous or background location service.
 - Android may terminate the app. Resume triggers re-observation; it cannot
   recover events the OS never delivered.
+- WorkManager's periodic task is deferred and opportunistic (15-minute minimum).
+  It samples and publishes battery/network/display state through the authenticated
+  Firestore client and refreshes authorized partner documents into local cache.
+  It never samples location or survives a force-stop guarantee.
 - Notification permission, channel settings, battery policy, and device settings
   can prevent an alert even when a rule matched.
 - Physical device/API-level permission, lifecycle, and release behavior have not

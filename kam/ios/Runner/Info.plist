@@ -26,6 +26,14 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.example.kam.partner-state-catch-up</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
 	<!-- Phase 10: foreground location only. The app explains why before asking,
 	     never tracks in the background, and never requests "always" access. -->
 	<key>NSLocationWhenInUseUsageDescription</key>
